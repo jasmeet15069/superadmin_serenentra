@@ -346,6 +346,35 @@ export interface FeatureMatrixResponse {
   matrix: Record<string, Record<string, boolean>>;
 }
 
+// Response of GET /api/platform/tenants/:id/detail — isolation + redacted conn.
+export interface TenantDetail {
+  hotel_id: string;
+  isolation_mode: string;
+  db_name: string;
+  redis_namespace: string;
+  connection: {
+    host: string;
+    port: string;
+    database: string;
+    user: string;
+    password: string;
+    sslmode: string;
+    scoped_by: string;
+  };
+}
+
+// A backup run record (GET /api/platform/tenants/:id/backup/history).
+export interface BackupJob {
+  id: string;
+  status: string;
+  trigger: string;
+  db_name: string;
+  bytes: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
 // Response of GET /api/platform/security — platform security posture.
 export interface SecurityOverview {
   operators: { email: string; full_name: string; platform_admin: boolean; roles: string[]; created_at: string }[];

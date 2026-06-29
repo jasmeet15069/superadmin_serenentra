@@ -32,6 +32,9 @@ import {
   usePlatformTenantBackupConfig,
   useUpdatePlatformTenantBackupConfig,
   usePlatformSecurity,
+  usePlatformTenantDetail,
+  usePlatformTenantBackupHistory,
+  useRunPlatformTenantBackup,
 } from "@/lib/api/hooks";
 import type { PlatformTenant } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
@@ -227,6 +230,7 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
   const updatePlanM = useUpdateTenantPlan();
   const plans = plansQ.data ?? [];
   const ordered = useMemo(() => orderTenants(tenants), [tenants]);
+  const [detail, setDetail] = useState<PlatformTenant | null>(null);
 
   const changePlan = async (t: PlatformTenant, plan_tier: string) => {
     try {
@@ -257,13 +261,14 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
               <TableHead>Rooms</TableHead>
               <TableHead>Users</TableHead>
               <TableHead>Database</TableHead>
-              <TableHead className="text-right">Active</TableHead>
+              <TableHead className="text-center">Active</TableHead>
+              <TableHead className="text-right">Detail</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && <TableRow><TableCell colSpan={7} className="text-center py-8"><Spinner /></TableCell></TableRow>}
+            {loading && <TableRow><TableCell colSpan={8} className="text-center py-8"><Spinner /></TableCell></TableRow>}
             {!loading && ordered.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8 text-sm">No clients yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8 text-sm">No clients yet.</TableCell></TableRow>
             )}
             {ordered.map((t, i) => {
               const isPrimary = t.id === PRIMARY_TENANT_ID;
@@ -292,8 +297,13 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
                   <TableCell className="text-sm">{t.rooms_used}{t.rooms_max ? ` / ${t.rooms_max}` : ""}</TableCell>
                   <TableCell className="text-sm">{t.users_used}{t.users_max ? ` / ${t.users_max}` : ""}</TableCell>
                   <TableCell className="text-xs font-mono text-muted-foreground">{t.database_name ?? "shared"}</TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-center">
                     <Switch checked={t.is_active} onCheckedChange={(v) => toggleActive(t, v)} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setDetail(t)}>
+                      <Database className="size-3.5" /> View
+                    </Button>
                   </TableCell>
                 </TableRow>
               );
@@ -301,7 +311,116 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
           </TableBody>
         </Table>
       </div>
+      {detail && <ClientDetailDialog tenant={detail} onClose={() => setDetail(null)} />}
     </Panel>
+  );
+}
+
+// Client detail drill-down: isolated DB + Redis + redacted connection, plus a
+// real backup runner (pg_dump over the live connection) with run history.
+function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClose: () => void }) {
+  const detailQ = usePlatformTenantDetail(tenant.id);
+  const cfgQ = usePlatformTenantBackupConfig(tenant.id);
+  const historyQ = usePlatformTenantBackupHistory(tenant.id);
+  const runM = useRunPlatformTenantBackup();
+  const d = detailQ.data;
+  const cfg = cfgQ.data?.config;
+  const jobs = historyQ.data?.jobs ?? [];
+
+  const fmtBytes = (b: number) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1024).toFixed(1)} KB`);
+
+  const runBackup = async () => {
+    try {
+      const r = await runM.mutateAsync(tenant.id);
+      toast.success(`Backup complete — ${fmtBytes(r.bytes)} (${r.db_name})`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Backup failed");
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Database className="size-4" /> {tenant.name}
+            <Badge variant="secondary" className="ml-1 text-[10px]">{tenant.plan_tier}</Badge>
+          </DialogTitle>
+          <DialogDescription>Isolated database, cache namespace, connection, and backups.</DialogDescription>
+        </DialogHeader>
+
+        {!d ? <Spinner /> : (
+          <div className="space-y-4">
+            {/* Database + connection */}
+            <div className="rounded-lg border p-3">
+              <div className="flex items-center gap-2 text-sm font-medium mb-2"><Database className="size-4 text-info" /> Database</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                <KV k="Isolation" v={<Badge variant={d.isolation_mode === "dedicated" ? "default" : "secondary"} className="text-[10px]">{d.isolation_mode}</Badge>} />
+                <KV k="Database" v={<span className="font-mono text-xs">{d.db_name}</span>} />
+                <KV k="Host" v={<span className="font-mono text-xs">{d.connection.host}:{d.connection.port}</span>} />
+                <KV k="User" v={<span className="font-mono text-xs">{d.connection.user}</span>} />
+                <KV k="Password" v={<span className="font-mono text-xs">{d.connection.password}</span>} />
+                <KV k="SSL" v={<span className="font-mono text-xs">{d.connection.sslmode}</span>} />
+                <div className="col-span-2"><KV k="Scoping" v={<span className="text-xs">{d.connection.scoped_by}</span>} /></div>
+              </div>
+            </div>
+
+            {/* Redis */}
+            <div className="rounded-lg border p-3">
+              <div className="flex items-center gap-2 text-sm font-medium mb-2"><Zap className="size-4 text-warning-foreground" /> Redis Cache</div>
+              <KV k="Namespace" v={<span className="font-mono text-xs">{d.redis_namespace}</span>} />
+            </div>
+
+            {/* Backups */}
+            <div className="rounded-lg border p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2 text-sm font-medium"><HardDrive className="size-4 text-success" /> Backups</div>
+                <Button size="sm" className="gap-1.5" disabled={runM.isPending} onClick={runBackup}>
+                  {runM.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <HardDrive className="size-3.5" />}
+                  {runM.isPending ? "Backing up…" : "Run backup now"}
+                </Button>
+              </div>
+              {cfg && (
+                <div className="text-xs text-muted-foreground mb-2">
+                  Policy: {cfg.enabled ? <span className="text-success">enabled</span> : "disabled"} · {DEST_LABELS[cfg.destination] ?? cfg.destination} · {cfg.cron_expr} · {cfg.retention_days}d retention{cfg.encrypt ? " · encrypted" : ""}
+                </div>
+              )}
+              {jobs.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2">No backups yet — run one now.</p>
+              ) : (
+                <Table>
+                  <TableHeader><TableRow><TableHead>When</TableHead><TableHead>DB</TableHead><TableHead>Size</TableHead><TableHead className="text-right">Status</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {jobs.map((j) => (
+                      <TableRow key={j.id}>
+                        <TableCell className="text-xs">{j.started_at}</TableCell>
+                        <TableCell className="text-xs font-mono">{j.db_name}</TableCell>
+                        <TableCell className="text-xs">{j.status === "success" ? fmtBytes(j.bytes) : "—"}</TableCell>
+                        <TableCell className="text-right">
+                          <Badge variant={j.status === "success" ? "secondary" : "destructive"} className="text-[10px]">{j.status}</Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function KV({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-muted-foreground">{k}</span>
+      <span>{v}</span>
+    </div>
   );
 }
 

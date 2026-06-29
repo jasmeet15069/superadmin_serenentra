@@ -19,6 +19,8 @@ import type {
   SecurityOverview,
   BackupConfig,
   BackupConfigResponse,
+  TenantDetail,
+  BackupJob,
   PlatformPlan,
   PlatformTenant,
   CreateTenantBody,
@@ -460,6 +462,34 @@ export function usePlatformTenantModules(id: string | null) {
     queryKey: ["platform", "tenant-modules", id] as const,
     queryFn: () => apiFetch<TenantModulesResponse>(`/api/platform/tenants/${id}/modules`),
     enabled: !!id && isAuthenticated(),
+  });
+}
+
+export function usePlatformTenantDetail(id: string | null) {
+  return useQuery({
+    queryKey: ["platform", "tenant-detail", id] as const,
+    queryFn: () => apiFetch<TenantDetail>(`/api/platform/tenants/${id}/detail`),
+    enabled: !!id && isAuthenticated(),
+  });
+}
+
+export function usePlatformTenantBackupHistory(id: string | null) {
+  return useQuery({
+    queryKey: ["platform", "backup-history", id] as const,
+    queryFn: () => apiFetch<{ jobs: BackupJob[] }>(`/api/platform/tenants/${id}/backup/history`),
+    enabled: !!id && isAuthenticated(),
+  });
+}
+
+export function useRunPlatformTenantBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ id: string; status: string; bytes: number; file: string; db_name: string }>(
+        `/api/platform/tenants/${id}/backup/run`,
+        { method: "POST" },
+      ),
+    onSuccess: (_d, id) => qc.invalidateQueries({ queryKey: ["platform", "backup-history", id] }),
   });
 }
 
