@@ -346,6 +346,21 @@ export interface FeatureMatrixResponse {
   matrix: Record<string, Record<string, boolean>>;
 }
 
+// Per-client backup policy (GET/PUT /api/platform/tenants/:id/backup-config).
+export interface BackupConfig {
+  hotel_id: string;
+  enabled: boolean;
+  cron_expr: string;
+  destination: string;
+  retention_days: number;
+  encrypt: boolean;
+  notify_email: string;
+}
+export interface BackupConfigResponse {
+  config: BackupConfig;
+  destinations: string[];
+}
+
 // Response of GET /api/platform/monitoring — a live platform-health snapshot.
 // Each section reports status independently (up/down) and degrades gracefully.
 export interface MonitoringSnapshot {

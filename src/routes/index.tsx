@@ -29,6 +29,8 @@ import {
   usePlatformTenantFeatureMatrix,
   useUpdatePlatformTenantFeatureMatrix,
   usePlatformMonitoring,
+  usePlatformTenantBackupConfig,
+  useUpdatePlatformTenantBackupConfig,
 } from "@/lib/api/hooks";
 import type { PlatformTenant } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
@@ -422,46 +424,123 @@ function FeatureMatrixTab({ tenants }: { tenants: PlatformTenant[] }) {
   );
 }
 
+// Live per-client backup configuration. The policy (enable, cadence, destination,
+// retention, encryption) persists via the backup-config API. The dump/upload
+// execution engine is a later slice, so "Run now" is intentionally disabled.
+const DEST_LABELS: Record<string, string> = {
+  local: "Local / NAS", gdrive: "Google Drive", supabase: "Supabase Storage",
+  s3: "AWS S3", r2: "Cloudflare R2", azure: "Azure Blob", dropbox: "Dropbox",
+  mega: "Mega", b2: "Backblaze B2", ftp: "FTP", sftp: "SFTP", nas: "NAS", minio: "MinIO",
+};
+
 function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
-  const destinations = ["Google Drive", "Supabase", "AWS S3", "Cloudflare R2", "Azure Blob", "Dropbox", "Mega", "Backblaze B2", "FTP", "SFTP", "NAS", "MinIO", "Local"];
+  const ordered = useMemo(() => orderTenants(tenants), [tenants]);
+  const [clientId, setClientId] = useState<string>("");
+  useEffect(() => { if (!clientId && ordered.length) setClientId(ordered[0].id); }, [ordered, clientId]);
+
+  const cfgQ = usePlatformTenantBackupConfig(clientId || null);
+  const updateM = useUpdatePlatformTenantBackupConfig();
+  const destinations = cfgQ.data?.destinations ?? [];
+
+  const [local, setLocal] = useState<Record<string, any> | null>(null);
+  useEffect(() => { if (cfgQ.data?.config) setLocal({ ...cfgQ.data.config }); }, [cfgQ.data]);
+
+  const clientName = ordered.find((t) => t.id === clientId)?.name ?? "client";
+  const set = (k: string, v: unknown) => setLocal((p: Record<string, unknown>) => ({ ...(p ?? {}), [k]: v }));
+
+  const dirty = useMemo(() => {
+    const base = cfgQ.data?.config;
+    if (!base || !local) return false;
+    return ["enabled", "cron_expr", "destination", "retention_days", "encrypt", "notify_email"].some((k) => local[k] !== (base as unknown as Record<string, unknown>)[k]);
+  }, [local, cfgQ.data]);
+
+  const save = async () => {
+    if (!local || !clientId) return;
+    try {
+      await updateM.mutateAsync({ id: clientId, config: {
+        enabled: local.enabled, cron_expr: local.cron_expr, destination: local.destination,
+        retention_days: Number(local.retention_days), encrypt: local.encrypt, notify_email: local.notify_email ?? "",
+      } });
+      toast.success(`Backup policy saved for ${clientName}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save backup config");
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <Panel title="Backup Center" icon={<HardDrive className="size-4 text-success" />} action={<PhaseBadge phase="4" />}>
-        <p className="text-sm text-muted-foreground mb-4">
-          Per-client schedule → <span className="font-mono text-xs">pg_dump + Redis snapshot → compress → encrypt → verify → upload</span>,
-          with retention, retry &amp; notifications. Nothing hardcoded — every client configures its own cadence and destination.
-        </p>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
-          {["Snapshot/Restore", "Compression", "Encryption", "Verification", "Retention", "Cron schedule", "Retry failed", "Notifications"].map((f) => (
-            <div key={f} className="flex items-center gap-2 text-sm rounded-md border px-2.5 py-1.5">
-              <CircleDot className="size-3 text-muted-foreground" /> {f}
-            </div>
-          ))}
+    <Panel
+      title="Backup Center"
+      icon={<HardDrive className="size-4 text-success" />}
+      action={
+        <Button size="sm" className="gap-1.5" disabled={!dirty || updateM.isPending} onClick={save}>
+          {updateM.isPending && <Loader2 className="size-3.5 animate-spin" />} Save policy
+        </Button>
+      }
+    >
+      <p className="text-sm text-muted-foreground mb-4">
+        Per-client backup policy — cadence, destination, retention &amp; encryption. Nothing hardcoded; each client
+        configures its own. The dump → encrypt → upload <span className="font-medium text-foreground">execution engine</span> is the next slice.
+      </p>
+
+      <div className="flex flex-wrap gap-3 mb-5">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Client</Label>
+          <Select value={clientId} onValueChange={setClientId}>
+            <SelectTrigger className="h-9 w-[240px]"><SelectValue placeholder="Select client" /></SelectTrigger>
+            <SelectContent>
+              {ordered.map((t, i) => <SelectItem key={t.id} value={t.id}>Client {i + 1} · {t.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Storage destinations</p>
-        <div className="flex flex-wrap gap-1.5">
-          {destinations.map((d) => <Badge key={d} variant="secondary">{d}</Badge>)}
+      </div>
+
+      {cfgQ.isLoading || !local ? <Spinner /> : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 max-w-2xl">
+          <label className="flex items-center justify-between gap-2 rounded-md border px-3 py-2.5 text-sm sm:col-span-2">
+            <span><span className="font-medium">Automated backups</span><span className="block text-xs text-muted-foreground">enable scheduled backups for this client</span></span>
+            <Switch checked={!!local.enabled} onCheckedChange={(v) => set("enabled", v)} />
+          </label>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Destination</Label>
+            <Select value={local.destination} onValueChange={(v) => set("destination", v)}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {destinations.map((d) => <SelectItem key={d} value={d}>{DEST_LABELS[d] ?? d}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Schedule (cron)</Label>
+            <Input value={local.cron_expr} onChange={(e) => set("cron_expr", e.target.value)} placeholder="0 3 * * *" className="font-mono" />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Retention (days)</Label>
+            <Input type="number" min={1} value={local.retention_days} onChange={(e) => set("retention_days", e.target.value)} />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Notify email (optional)</Label>
+            <Input type="email" value={local.notify_email ?? ""} onChange={(e) => set("notify_email", e.target.value)} placeholder="ops@client.com" />
+          </div>
+
+          <label className="flex items-center justify-between gap-2 rounded-md border px-3 py-2.5 text-sm sm:col-span-2">
+            <span><span className="font-medium">Encrypt backups</span><span className="block text-xs text-muted-foreground">AES encryption before upload</span></span>
+            <Switch checked={!!local.encrypt} onCheckedChange={(v) => set("encrypt", v)} />
+          </label>
+
+          <div className="sm:col-span-2 flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled className="gap-1.5">
+              <HardDrive className="size-3.5" /> Run backup now
+            </Button>
+            <span className="text-xs text-muted-foreground">execution engine ships next slice</span>
+          </div>
         </div>
-      </Panel>
-      <Panel title="Per-Client Backup Status" icon={<Database className="size-4 text-info" />}>
-        <Table>
-          <TableHeader><TableRow><TableHead>Client</TableHead><TableHead>Schedule</TableHead><TableHead>Destination</TableHead><TableHead>Last backup</TableHead><TableHead className="text-right">Enabled</TableHead></TableRow></TableHeader>
-          <TableBody>
-            {orderTenants(tenants).slice(0, 6).map((t, i) => (
-              <TableRow key={t.id}>
-                <TableCell className="font-medium"><span className="text-muted-foreground tabular-nums mr-2">#{i + 1}</span>{t.name}</TableCell>
-                <TableCell className="text-muted-foreground text-sm">— not configured</TableCell>
-                <TableCell className="text-muted-foreground text-sm">—</TableCell>
-                <TableCell className="text-muted-foreground text-sm">—</TableCell>
-                <TableCell className="text-right"><Switch disabled /></TableCell>
-              </TableRow>
-            ))}
-            {tenants.length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-6 text-sm">No clients.</TableCell></TableRow>}
-          </TableBody>
-        </Table>
-        <NextStep text="Wire migration 016_backup (backup_configurations/jobs/storage_destinations) + StorageDriver interface + cron scheduler." />
-      </Panel>
-    </div>
+      )}
+      <NextStep text="Next: backup_jobs table + pg_dump→gzip→encrypt→upload runner + cron scheduler + history & restore." />
+    </Panel>
   );
 }
 

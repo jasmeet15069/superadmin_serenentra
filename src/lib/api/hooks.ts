@@ -16,6 +16,8 @@ import type {
   TenantModulesResponse,
   FeatureMatrixResponse,
   MonitoringSnapshot,
+  BackupConfig,
+  BackupConfigResponse,
   PlatformPlan,
   PlatformTenant,
   CreateTenantBody,
@@ -457,6 +459,26 @@ export function usePlatformTenantModules(id: string | null) {
     queryKey: ["platform", "tenant-modules", id] as const,
     queryFn: () => apiFetch<TenantModulesResponse>(`/api/platform/tenants/${id}/modules`),
     enabled: !!id && isAuthenticated(),
+  });
+}
+
+export function usePlatformTenantBackupConfig(id: string | null) {
+  return useQuery({
+    queryKey: ["platform", "backup-config", id] as const,
+    queryFn: () => apiFetch<BackupConfigResponse>(`/api/platform/tenants/${id}/backup-config`),
+    enabled: !!id && isAuthenticated(),
+  });
+}
+
+export function useUpdatePlatformTenantBackupConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, config }: { id: string; config: Partial<BackupConfig> }) =>
+      apiFetch<BackupConfigResponse>(`/api/platform/tenants/${id}/backup-config`, {
+        method: "PUT",
+        body: config,
+      }),
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["platform", "backup-config", v.id] }),
   });
 }
 
