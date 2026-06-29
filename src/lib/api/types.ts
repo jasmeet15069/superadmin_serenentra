@@ -346,6 +346,24 @@ export interface FeatureMatrixResponse {
   matrix: Record<string, Record<string, boolean>>;
 }
 
+// Response of GET /api/platform/security — platform security posture.
+export interface SecurityOverview {
+  operators: { email: string; full_name: string; platform_admin: boolean; roles: string[]; created_at: string }[];
+  user_count: number;
+  controls: {
+    access_token_ttl_minutes: number;
+    refresh_token_ttl_hours: number;
+    bcrypt_cost: number;
+    rate_limit_per_min: { basic: number; pro: number; premium: number };
+    global_ip_limit_per_min: number;
+    tls: boolean;
+    cors_allowlist: boolean;
+    mfa_enabled: boolean;
+    ip_allowlist_enabled: boolean;
+    refresh_rotation_enabled: boolean;
+  };
+}
+
 // Per-client backup policy (GET/PUT /api/platform/tenants/:id/backup-config).
 export interface BackupConfig {
   hotel_id: string;

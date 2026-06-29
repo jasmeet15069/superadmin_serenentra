@@ -16,6 +16,7 @@ import type {
   TenantModulesResponse,
   FeatureMatrixResponse,
   MonitoringSnapshot,
+  SecurityOverview,
   BackupConfig,
   BackupConfigResponse,
   PlatformPlan,
@@ -459,6 +460,14 @@ export function usePlatformTenantModules(id: string | null) {
     queryKey: ["platform", "tenant-modules", id] as const,
     queryFn: () => apiFetch<TenantModulesResponse>(`/api/platform/tenants/${id}/modules`),
     enabled: !!id && isAuthenticated(),
+  });
+}
+
+export function usePlatformSecurity() {
+  return useQuery({
+    queryKey: ["platform", "security"] as const,
+    queryFn: () => apiFetch<SecurityOverview>("/api/platform/security"),
+    enabled: isAuthenticated(),
   });
 }
 

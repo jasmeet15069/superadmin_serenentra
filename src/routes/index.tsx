@@ -31,6 +31,7 @@ import {
   usePlatformMonitoring,
   usePlatformTenantBackupConfig,
   useUpdatePlatformTenantBackupConfig,
+  usePlatformSecurity,
 } from "@/lib/api/hooks";
 import type { PlatformTenant } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
@@ -648,21 +649,80 @@ function ServiceCard({ label, icon, status, detail }: { label: string; icon: Rea
   );
 }
 
+// Live security overview — real platform operators + configured controls from
+// GET /api/platform/security, plus the hardening roadmap for not-yet-enabled items.
 function SecurityTab() {
-  const live = ["JWT (access 15m / refresh 168h)", "bcrypt cost 12", "Per-client rate limiting", "Per-IP DoS guard (240/min)", "CORS allow-list"];
-  const planned = ["2FA / MFA (TOTP)", "Refresh-token rotation", "Password policy", "IP whitelist (per client)", "Session & device mgmt", "CAPTCHA", "CSRF", "XSS hardening", "SQLi sweep", "Secret rotation", "Vault integration", "Encryption at rest", "Threat detection", "Audit log (all admin actions)"];
+  const q = usePlatformSecurity();
+  const d = q.data;
+
+  if (q.isLoading || !d) {
+    return <Panel title="Security" icon={<ShieldCheck className="size-4 text-success" />}><Spinner /></Panel>;
+  }
+
+  const c = d.controls;
+  const live = [
+    `JWT — access ${c.access_token_ttl_minutes}m / refresh ${c.refresh_token_ttl_hours}h`,
+    `bcrypt cost ${c.bcrypt_cost}`,
+    `Per-client rate limit — ${c.rate_limit_per_min.basic}/${c.rate_limit_per_min.pro}/${c.rate_limit_per_min.premium} per min`,
+    `Per-IP DoS guard — ${c.global_ip_limit_per_min}/min`,
+    c.tls ? "TLS (HTTPS) enforced" : null,
+    c.cors_allowlist ? "CORS allow-list" : null,
+  ].filter(Boolean) as string[];
+
+  const planned: [string, boolean][] = [
+    ["2FA / MFA (TOTP)", c.mfa_enabled],
+    ["Refresh-token rotation", c.refresh_rotation_enabled],
+    ["IP allow-list (per client)", c.ip_allowlist_enabled],
+    ["Password policy", false],
+    ["Session & device management", false],
+    ["CAPTCHA on auth", false],
+    ["Secret rotation / Vault", false],
+    ["Threat detection", false],
+    ["Audit log (all admin actions)", false],
+  ];
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Panel title="Active Controls" icon={<ShieldCheck className="size-4 text-success" />}>
-        <div className="space-y-2">
-          {live.map((s) => <div key={s} className="flex items-center gap-2 text-sm"><CircleDot className="size-3 text-success" /> {s}</div>)}
-        </div>
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Stat label="Platform Operators" value={d.operators.length} tone="info" />
+        <Stat label="Total Accounts" value={d.user_count} />
+        <Stat label="MFA" value={c.mfa_enabled ? "On" : "Off"} tone={c.mfa_enabled ? "success" : "warning"} />
+        <Stat label="TLS" value={c.tls ? "Enforced" : "Off"} tone={c.tls ? "success" : "destructive"} />
+      </div>
+
+      <Panel title="Platform Operators" icon={<Users2 className="size-4 text-primary" />}>
+        <p className="text-sm text-muted-foreground mb-3">Accounts that can sign in to this superadmin console.</p>
+        <Table>
+          <TableHeader><TableRow><TableHead>Email</TableHead><TableHead>Name</TableHead><TableHead>Roles</TableHead><TableHead>Since</TableHead></TableRow></TableHeader>
+          <TableBody>
+            {d.operators.map((o) => (
+              <TableRow key={o.email}>
+                <TableCell className="font-medium">{o.email}</TableCell>
+                <TableCell className="text-sm">{o.full_name || "—"}</TableCell>
+                <TableCell><div className="flex flex-wrap gap-1">{o.roles.map((r) => <Badge key={r} variant="secondary" className="text-[10px]">{r.replace(/_/g, " ")}</Badge>)}</div></TableCell>
+                <TableCell className="text-sm text-muted-foreground">{o.created_at}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </Panel>
-      <Panel title="Hardening Roadmap" icon={<Lock className="size-4 text-warning-foreground" />} action={<PhaseBadge phase="6" />}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-          {planned.map((s) => <div key={s} className="flex items-center gap-2 text-sm text-muted-foreground"><CircleDot className="size-3" /> {s}</div>)}
-        </div>
-      </Panel>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel title="Active Controls" icon={<ShieldCheck className="size-4 text-success" />}>
+          <div className="space-y-2">
+            {live.map((s) => <div key={s} className="flex items-center gap-2 text-sm"><CircleDot className="size-3 text-success" /> {s}</div>)}
+          </div>
+        </Panel>
+        <Panel title="Hardening Roadmap" icon={<Lock className="size-4 text-warning-foreground" />} action={<PhaseBadge phase="6" />}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {planned.map(([s, on]) => (
+              <div key={s} className={`flex items-center gap-2 text-sm ${on ? "" : "text-muted-foreground"}`}>
+                <CircleDot className={`size-3 ${on ? "text-success" : ""}`} /> {s}{on ? "" : ""}
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </div>
     </div>
   );
 }
