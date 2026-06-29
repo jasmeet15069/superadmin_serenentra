@@ -14,6 +14,10 @@ import {
   Loader2,
   ArrowUpRight,
   CircleDot,
+  Server,
+  Cpu,
+  Zap,
+  RefreshCw,
 } from "lucide-react";
 
 import { PageHeader, Stat } from "@/components/AppShell";
@@ -24,6 +28,7 @@ import {
   useCreatePlatformTenant,
   usePlatformTenantFeatureMatrix,
   useUpdatePlatformTenantFeatureMatrix,
+  usePlatformMonitoring,
 } from "@/lib/api/hooks";
 import type { PlatformTenant } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
@@ -460,26 +465,107 @@ function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
   );
 }
 
+// Live monitoring — polls GET /api/platform/monitoring every 10s and renders a
+// real platform-health snapshot (Postgres, Redis, worker pool, Go runtime).
 function MonitoringTab() {
-  const metrics = ["CPU", "RAM", "Disk", "Redis", "PostgreSQL", "API", "Workers", "Cron Jobs", "Queues", "Storage", "Bandwidth", "DB Connections", "Slow Queries", "Error Rate", "Uptime", "SSL", "Response Time", "Alerts"];
+  const q = usePlatformMonitoring();
+  const d = q.data;
+
+  const fmtUptime = (s?: number) => {
+    if (!s && s !== 0) return "—";
+    const dd = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    if (dd > 0) return `${dd}d ${h}h`;
+    if (h > 0) return `${h}h ${m}m`;
+    return `${m}m`;
+  };
+  const mb = (v?: number) => (v == null ? "—" : `${v.toFixed(1)} MB`);
+
+  if (q.isLoading || !d) {
+    return <Panel title="Live Monitoring" icon={<Gauge className="size-4 text-info" />}><Spinner /></Panel>;
+  }
+
   return (
-    <Panel title="Live Monitoring" icon={<Gauge className="size-4 text-info" />} action={<PhaseBadge phase="5" />}>
-      <p className="text-sm text-muted-foreground mb-4">
-        Real-time platform health with per-client dimensions and configurable alert thresholds. Builds on the existing
-        OpenTelemetry metrics and <span className="font-mono text-xs">/health · /ready</span> probes.
-      </p>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-        {metrics.map((m) => (
-          <div key={m} className="rounded-lg border p-3">
-            <div className="text-xs text-muted-foreground">{m}</div>
-            <div className="text-lg font-semibold font-display flex items-center gap-1.5 text-muted-foreground/60">
-              <CircleDot className="size-3" /> —
-            </div>
-          </div>
-        ))}
+    <div className="space-y-4">
+      {/* Service status strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <ServiceCard label="API" icon={<Server className="size-4" />} up status="up"
+          detail={`v${d.app.version} · up ${fmtUptime(d.app.uptime_seconds)}`} />
+        <ServiceCard label="PostgreSQL" icon={<Database className="size-4" />} status={d.postgres.status}
+          detail={d.postgres.status === "up" ? `v${d.postgres.version ?? "?"} · ${d.postgres.ping_ms ?? 0}ms` : "unreachable"} />
+        <ServiceCard label="Redis" icon={<Zap className="size-4" />} status={d.redis.status}
+          detail={d.redis.status === "up" ? `${d.redis.ping_ms ?? 0}ms · ${d.redis.connected_clients ?? 0} clients` : "unreachable"} />
+        <ServiceCard label="Worker Pool" icon={<Cpu className="size-4" />} status={d.workers.status}
+          detail={`${d.workers.queued ?? 0} queued · ${d.workers.completed ?? 0} done`} />
       </div>
-      <NextStep text="Wire OTel → Prometheus/Grafana + GET /superadmin/monitoring & /superadmin/analytics + alert rules." />
-    </Panel>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Panel title="PostgreSQL" icon={<Database className="size-4 text-info" />}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <MiniStat label="DB Size" value={mb(d.postgres.db_size_mb)} />
+            <MiniStat label="Active Conns" value={d.postgres.active_connections ?? "—"} />
+            <MiniStat label="Ping" value={`${d.postgres.ping_ms ?? 0} ms`} />
+            <MiniStat label="Pool Acquired" value={`${d.postgres.pool?.acquired ?? 0}/${d.postgres.pool?.max ?? 0}`} />
+            <MiniStat label="Pool Idle" value={d.postgres.pool?.idle ?? "—"} />
+            <MiniStat label="Acquired Total" value={d.postgres.pool?.acquired_total ?? "—"} />
+          </div>
+        </Panel>
+
+        <Panel title="Redis" icon={<Zap className="size-4 text-warning-foreground" />}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <MiniStat label="Memory" value={mb(d.redis.used_memory_mb)} />
+            <MiniStat label="Clients" value={d.redis.connected_clients ?? "—"} />
+            <MiniStat label="Hit Rate" value={d.redis.hit_rate_pct != null ? `${d.redis.hit_rate_pct}%` : "—"} />
+            <MiniStat label="Ops/sec" value={d.redis.ops_per_sec ?? "—"} />
+            <MiniStat label="Uptime" value={fmtUptime(d.redis.uptime_seconds)} />
+            <MiniStat label="Ping" value={`${d.redis.ping_ms ?? 0} ms`} />
+          </div>
+        </Panel>
+
+        <Panel title="Go Runtime" icon={<Cpu className="size-4 text-primary" />}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <MiniStat label="Goroutines" value={d.runtime.goroutines} />
+            <MiniStat label="CPUs" value={d.runtime.num_cpu} />
+            <MiniStat label="Mem Alloc" value={mb(d.runtime.mem_alloc_mb)} />
+            <MiniStat label="Mem Sys" value={mb(d.runtime.mem_sys_mb)} />
+            <MiniStat label="GC Runs" value={d.runtime.gc_runs} />
+            <MiniStat label="Go" value={d.runtime.go_version.replace("go", "")} />
+          </div>
+        </Panel>
+
+        <Panel title="Worker Pool" icon={<Server className="size-4 text-success" />}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <MiniStat label="Queued" value={d.workers.queued ?? "—"} />
+            <MiniStat label="Submitted" value={d.workers.submitted ?? "—"} />
+            <MiniStat label="Completed" value={d.workers.completed ?? "—"} />
+            <MiniStat label="Failed" value={d.workers.failed ?? "—"} />
+            <MiniStat label="Dropped" value={d.workers.dropped ?? "—"} />
+          </div>
+        </Panel>
+      </div>
+
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <RefreshCw className={`size-3 ${q.isFetching ? "animate-spin" : ""}`} />
+        Auto-refreshing every 10s · last updated {new Date(d.generated_at).toLocaleTimeString()}
+      </div>
+    </div>
+  );
+}
+
+function ServiceCard({ label, icon, status, detail }: { label: string; icon: React.ReactNode; status: "up" | "down" | string; up?: boolean; detail: string }) {
+  const ok = status === "up";
+  return (
+    <div className="bg-card border rounded-lg p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-medium">{icon}{label}</div>
+        <span className={`flex items-center gap-1.5 text-xs font-medium ${ok ? "text-success" : "text-destructive"}`}>
+          <span className={`size-2 rounded-full ${ok ? "bg-success" : "bg-destructive"}`} />
+          {ok ? "Operational" : "Down"}
+        </span>
+      </div>
+      <div className="text-xs text-muted-foreground mt-2">{detail}</div>
+    </div>
   );
 }
 

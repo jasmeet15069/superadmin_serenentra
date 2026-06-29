@@ -15,6 +15,7 @@ import type {
   PosOrderApi,
   TenantModulesResponse,
   FeatureMatrixResponse,
+  MonitoringSnapshot,
   PlatformPlan,
   PlatformTenant,
   CreateTenantBody,
@@ -456,6 +457,16 @@ export function usePlatformTenantModules(id: string | null) {
     queryKey: ["platform", "tenant-modules", id] as const,
     queryFn: () => apiFetch<TenantModulesResponse>(`/api/platform/tenants/${id}/modules`),
     enabled: !!id && isAuthenticated(),
+  });
+}
+
+// Live platform-health snapshot — polled on an interval for a "live" dashboard.
+export function usePlatformMonitoring() {
+  return useQuery({
+    queryKey: ["platform", "monitoring"] as const,
+    queryFn: () => apiFetch<MonitoringSnapshot>("/api/platform/monitoring"),
+    enabled: isAuthenticated(),
+    refetchInterval: 10_000,
   });
 }
 

@@ -346,6 +346,49 @@ export interface FeatureMatrixResponse {
   matrix: Record<string, Record<string, boolean>>;
 }
 
+// Response of GET /api/platform/monitoring — a live platform-health snapshot.
+// Each section reports status independently (up/down) and degrades gracefully.
+export interface MonitoringSnapshot {
+  generated_at: string;
+  app: { version: string; uptime_seconds: number };
+  runtime: {
+    go_version: string;
+    goroutines: number;
+    num_cpu: number;
+    mem_alloc_mb: number;
+    mem_sys_mb: number;
+    heap_objects: number;
+    gc_runs: number;
+  };
+  postgres: {
+    status: "up" | "down";
+    ping_ms?: number;
+    version?: string;
+    db_size_mb?: number;
+    active_connections?: number;
+    pool?: { total: number; acquired: number; idle: number; max: number; acquired_total: number };
+  };
+  redis: {
+    status: "up" | "down";
+    ping_ms?: number;
+    used_memory_mb?: number;
+    connected_clients?: number;
+    uptime_seconds?: number;
+    ops_per_sec?: number;
+    keyspace_hits?: number;
+    keyspace_misses?: number;
+    hit_rate_pct?: number;
+  };
+  workers: {
+    status: "up" | "down";
+    submitted?: number;
+    completed?: number;
+    failed?: number;
+    dropped?: number;
+    queued?: number;
+  };
+}
+
 // Plan tier as returned by GET /api/platform/plans (only id+name are needed by
 // the master UI; other fields exist but are not consumed here).
 export interface PlatformPlan {
