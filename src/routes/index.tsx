@@ -22,6 +22,8 @@ import {
   usePlatformPlans,
   useUpdateTenantPlan,
   useCreatePlatformTenant,
+  usePlatformTenantFeatureMatrix,
+  useUpdatePlatformTenantFeatureMatrix,
 } from "@/lib/api/hooks";
 import type { PlatformTenant } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
@@ -111,7 +113,7 @@ function Dashboard() {
 
         <TabsContent value="overview" className="mt-4"><OverviewTab tenants={tenants} loading={tenantsQ.isLoading} /></TabsContent>
         <TabsContent value="clients" className="mt-4"><ClientsTab tenants={tenants} loading={tenantsQ.isLoading} /></TabsContent>
-        <TabsContent value="access" className="mt-4"><FeatureMatrixTab /></TabsContent>
+        <TabsContent value="access" className="mt-4"><FeatureMatrixTab tenants={tenants} /></TabsContent>
         <TabsContent value="backups" className="mt-4"><BackupsTab tenants={tenants} /></TabsContent>
         <TabsContent value="monitoring" className="mt-4"><MonitoringTab /></TabsContent>
         <TabsContent value="security" className="mt-4"><SecurityTab /></TabsContent>
@@ -295,37 +297,122 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
   );
 }
 
-function FeatureMatrixTab() {
+// Live role × feature matrix editor. Pick a client + role, toggle which modules
+// that role can access on that client, and save. Plan sets the ceiling; this
+// sets what each role actually sees. Default-on: everything enabled until turned
+// off. Enforced live by featureMatrixGate.
+function FeatureMatrixTab({ tenants }: { tenants: PlatformTenant[] }) {
+  const ordered = useMemo(() => orderTenants(tenants), [tenants]);
+  const [clientId, setClientId] = useState<string>("");
+  const [role, setRole] = useState<string>("receptionist");
+
+  // Default the client selector to the primary tenant once tenants load.
+  useEffect(() => {
+    if (!clientId && ordered.length) setClientId(ordered[0].id);
+  }, [ordered, clientId]);
+
+  const matrixQ = usePlatformTenantFeatureMatrix(clientId || null);
+  const updateM = useUpdatePlatformTenantFeatureMatrix();
+
+  // Local editable copy of the selected role's feature flags.
+  const [local, setLocal] = useState<Record<string, boolean> | null>(null);
+  useEffect(() => {
+    if (matrixQ.data?.matrix?.[role]) setLocal({ ...matrixQ.data.matrix[role] });
+    else setLocal(null);
+  }, [matrixQ.data, role]);
+
+  const registry = matrixQ.data?.registry ?? [];
+  const roles = matrixQ.data?.roles ?? [];
+  const groups = useMemo(() => {
+    const g: Record<string, typeof registry> = {};
+    for (const m of registry) (g[m.group] ??= []).push(m);
+    return g;
+  }, [registry]);
+
+  const dirty = useMemo(() => {
+    const base = matrixQ.data?.matrix?.[role];
+    if (!base || !local) return false;
+    return Object.keys(local).some((k) => local[k] !== base[k]);
+  }, [local, matrixQ.data, role]);
+
+  const clientName = ordered.find((t) => t.id === clientId)?.name ?? "client";
+
+  const save = async () => {
+    if (!local || !clientId) return;
+    try {
+      await updateM.mutateAsync({ id: clientId, matrix: { [role]: local } });
+      toast.success(`Saved ${role} access for ${clientName}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save matrix");
+    }
+  };
+
   return (
-    <Panel title="Role-Feature Matrix" icon={<Users2 className="size-4 text-primary" />} action={<PhaseBadge phase="2" />}>
+    <Panel
+      title="Role-Feature Matrix"
+      icon={<Users2 className="size-4 text-primary" />}
+      action={
+        <Button size="sm" className="gap-1.5" disabled={!dirty || updateM.isPending} onClick={save}>
+          {updateM.isPending && <Loader2 className="size-3.5 animate-spin" />} Save
+        </Button>
+      }
+    >
       <p className="text-sm text-muted-foreground mb-4">
-        Per-client <span className="font-medium text-foreground">client × role × feature</span> access. Plan sets the
-        ceiling; this matrix sets what each role on each client can actually see — fully independent per client.
+        Pick a client and role, then choose which modules that role can access — fully independent per client. Plan
+        sets the ceiling; this sets what each role actually sees. Off = the API blocks it (403) for that role.
       </p>
-      <div className="rounded-lg border overflow-hidden">
-        <div className="grid grid-cols-4 text-xs font-medium bg-muted/50 px-3 py-2">
-          <span>Feature</span>
-          <span className="text-center">Client A · receptionist</span>
-          <span className="text-center">Client B · receptionist</span>
-          <span className="text-center">Enforced by</span>
+
+      <div className="flex flex-wrap gap-3 mb-4">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Client</Label>
+          <Select value={clientId} onValueChange={setClientId}>
+            <SelectTrigger className="h-9 w-[220px]"><SelectValue placeholder="Select client" /></SelectTrigger>
+            <SelectContent>
+              {ordered.map((t, i) => (
+                <SelectItem key={t.id} value={t.id}>Client {i + 1} · {t.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        {[
-          ["Dashboard", true, true],
-          ["Rooms", true, true],
-          ["Reservations", true, true],
-          ["Billing", false, true],
-          ["CRM", false, true],
-          ["POS", false, true],
-        ].map(([f, a, b]) => (
-          <div key={f as string} className="grid grid-cols-4 px-3 py-2 text-sm border-t items-center">
-            <span>{f as string}</span>
-            <span className="text-center">{a ? "✓" : "✗"}</span>
-            <span className="text-center">{b ? "✓" : "✗"}</span>
-            <span className="text-center text-xs text-muted-foreground font-mono">featureMatrixGate</span>
-          </div>
-        ))}
+        <div className="space-y-1.5">
+          <Label className="text-xs">Role</Label>
+          <Select value={role} onValueChange={setRole}>
+            <SelectTrigger className="h-9 w-[200px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {roles.map((r) => <SelectItem key={r} value={r}>{r.replace(/_/g, " ")}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
-      <NextStep text="Wire migration 014_client_role_permissions + featureMatrixGate, then GET/PUT /superadmin/clients/:id/feature-matrix." />
+
+      {matrixQ.isLoading || !local ? (
+        <Spinner />
+      ) : (
+        <div className="space-y-4">
+          {Object.entries(groups).map(([group, mods]) => (
+            <div key={group}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">{group}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {mods.map((m) => (
+                  <label key={m.key} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer hover:bg-accent/50">
+                    <span className="truncate">{m.label}</span>
+                    <Switch
+                      checked={local[m.key] !== false}
+                      onCheckedChange={(v) => setLocal((p) => ({ ...(p ?? {}), [m.key]: v }))}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
+            <Badge variant="secondary">
+              {Object.values(local).filter((v) => v !== false).length}/{registry.length} enabled
+            </Badge>
+            <span>for <span className="font-medium text-foreground">{role.replace(/_/g, " ")}</span> on {clientName}</span>
+          </div>
+        </div>
+      )}
     </Panel>
   );
 }

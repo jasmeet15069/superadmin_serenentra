@@ -14,6 +14,7 @@ import type {
   CreatePosOrderBody,
   PosOrderApi,
   TenantModulesResponse,
+  FeatureMatrixResponse,
   PlatformPlan,
   PlatformTenant,
   CreateTenantBody,
@@ -455,6 +456,27 @@ export function usePlatformTenantModules(id: string | null) {
     queryKey: ["platform", "tenant-modules", id] as const,
     queryFn: () => apiFetch<TenantModulesResponse>(`/api/platform/tenants/${id}/modules`),
     enabled: !!id && isAuthenticated(),
+  });
+}
+
+export function usePlatformTenantFeatureMatrix(id: string | null) {
+  return useQuery({
+    queryKey: ["platform", "feature-matrix", id] as const,
+    queryFn: () => apiFetch<FeatureMatrixResponse>(`/api/platform/tenants/${id}/feature-matrix`),
+    enabled: !!id && isAuthenticated(),
+  });
+}
+
+export function useUpdatePlatformTenantFeatureMatrix() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, matrix }: { id: string; matrix: Record<string, Record<string, boolean>> }) =>
+      apiFetch<FeatureMatrixResponse>(`/api/platform/tenants/${id}/feature-matrix`, {
+        method: "PUT",
+        body: { matrix },
+      }),
+    onSuccess: (_d, v) =>
+      qc.invalidateQueries({ queryKey: ["platform", "feature-matrix", v.id] }),
   });
 }
 

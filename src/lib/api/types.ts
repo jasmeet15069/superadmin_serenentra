@@ -336,6 +336,16 @@ export interface TenantModulesResponse {
   overrides?: Record<string, boolean>;
 }
 
+// Response of GET/PUT /api/platform/tenants/:id/feature-matrix — the per-client
+// role × feature access matrix enforced by featureMatrixGate. `matrix[role][key]`
+// is the EFFECTIVE enabled flag (default-on); the editor edits these booleans and
+// PUTs them back (only denials are persisted server-side).
+export interface FeatureMatrixResponse {
+  roles: string[];
+  registry: ModuleDef[];
+  matrix: Record<string, Record<string, boolean>>;
+}
+
 // Plan tier as returned by GET /api/platform/plans (only id+name are needed by
 // the master UI; other fields exist but are not consumed here).
 export interface PlatformPlan {
