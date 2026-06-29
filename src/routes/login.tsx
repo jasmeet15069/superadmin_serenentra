@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 
 export const Route = createFileRoute("/login")({
-  head: () => ({ meta: [{ title: "Sign in · MHMS" }] }),
+  head: () => ({ meta: [{ title: "Sign in · Serenentra Superadmin" }] }),
   component: LoginPage,
 });
 
