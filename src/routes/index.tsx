@@ -560,12 +560,26 @@ function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
 
   const cfgQ = usePlatformTenantBackupConfig(clientId || null);
   const updateM = useUpdatePlatformTenantBackupConfig();
+  const historyQ = usePlatformTenantBackupHistory(clientId || null);
+  const runM = useRunPlatformTenantBackup();
   const destinations = cfgQ.data?.destinations ?? [];
+  const jobs = historyQ.data?.jobs ?? [];
 
   const [local, setLocal] = useState<Record<string, any> | null>(null);
   useEffect(() => { if (cfgQ.data?.config) setLocal({ ...cfgQ.data.config }); }, [cfgQ.data]);
 
   const clientName = ordered.find((t) => t.id === clientId)?.name ?? "client";
+  const fmtBytes = (b: number) => (b > 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${(b / 1024).toFixed(1)} KB`);
+
+  const runBackup = async () => {
+    if (!clientId) return;
+    try {
+      const r = await runM.mutateAsync(clientId);
+      toast.success(`Backup complete — ${fmtBytes(r.bytes)} (${r.db_name})`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Backup failed");
+    }
+  };
   const set = (k: string, v: unknown) => setLocal((p: Record<string, unknown>) => ({ ...(p ?? {}), [k]: v }));
 
   const dirty = useMemo(() => {
@@ -599,7 +613,7 @@ function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
     >
       <p className="text-sm text-muted-foreground mb-4">
         Per-client backup policy — cadence, destination, retention &amp; encryption. Nothing hardcoded; each client
-        configures its own. The dump → encrypt → upload <span className="font-medium text-foreground">execution engine</span> is the next slice.
+        configures its own. <span className="font-medium text-foreground">Run backup now</span> performs a real pg_dump over the live connection.
       </p>
 
       <div className="flex flex-wrap gap-3 mb-5">
@@ -651,15 +665,35 @@ function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
             <Switch checked={!!local.encrypt} onCheckedChange={(v) => set("encrypt", v)} />
           </label>
 
-          <div className="sm:col-span-2 flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled className="gap-1.5">
-              <HardDrive className="size-3.5" /> Run backup now
+          <div className="sm:col-span-2 flex items-center gap-2 border-t pt-4">
+            <Button size="sm" className="gap-1.5" disabled={runM.isPending} onClick={runBackup}>
+              {runM.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <HardDrive className="size-3.5" />}
+              {runM.isPending ? "Backing up…" : "Run backup now"}
             </Button>
-            <span className="text-xs text-muted-foreground">execution engine ships next slice</span>
+            <span className="text-xs text-muted-foreground">runs a real pg_dump over the live connection</span>
           </div>
+
+          {jobs.length > 0 && (
+            <div className="sm:col-span-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Recent backups</p>
+              <Table>
+                <TableHeader><TableRow><TableHead>When</TableHead><TableHead>DB</TableHead><TableHead>Size</TableHead><TableHead className="text-right">Status</TableHead></TableRow></TableHeader>
+                <TableBody>
+                  {jobs.slice(0, 5).map((j) => (
+                    <TableRow key={j.id}>
+                      <TableCell className="text-xs">{j.started_at}</TableCell>
+                      <TableCell className="text-xs font-mono">{j.db_name}</TableCell>
+                      <TableCell className="text-xs">{j.status === "success" ? fmtBytes(j.bytes) : "—"}</TableCell>
+                      <TableCell className="text-right"><Badge variant={j.status === "success" ? "secondary" : "destructive"} className="text-[10px]">{j.status}</Badge></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </div>
       )}
-      <NextStep text="Next: backup_jobs table + pg_dump→gzip→encrypt→upload runner + cron scheduler + history & restore." />
+      <NextStep text="Backups run + persist locally now. Remaining: upload to external destination (S3/Drive/etc.), scheduled cron runner, and restore." />
     </Panel>
   );
 }
