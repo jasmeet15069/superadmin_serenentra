@@ -50,7 +50,7 @@ import {
   usePlatformPlanFeatures,
   useUpdatePlatformPlanFeatures,
 } from "@/lib/api/hooks";
-import type { PlatformTenant } from "@/lib/api/types";
+import type { PlatformTenant, BackupJob } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -448,7 +448,7 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
             <div className="rounded-lg border p-3">
               <div className="flex items-center gap-2 text-sm font-medium mb-2"><Database className="size-4 text-info" /> Database</div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
-                <KV k="Isolation" v={<Badge variant={d.isolation_mode === "dedicated" ? "default" : "secondary"} className="text-[10px]">{d.isolation_mode}</Badge>} />
+                <KV k="Isolation" v={<Badge variant={d.isolation_mode === "dedicated" ? "default" : "secondary"} className="text-[10px] capitalize">{d.isolation_mode}</Badge>} />
                 <KV k="Database" v={<span className="font-mono text-xs">{d.db_name}</span>} />
                 <KV k="Host" v={<span className="font-mono text-xs">{d.connection.host}:{d.connection.port}</span>} />
                 <KV k="User" v={<span className="font-mono text-xs">{d.connection.user}</span>} />
@@ -497,6 +497,10 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
                           {j.status === "success" ? (
                             <Button variant="outline" size="sm" className="gap-1 h-7" onClick={() => downloadBackup(j)} title="Download backup">
                               <Download className="size-3" /> Get
+                            </Button>
+                          ) : j.status === "failed" ? (
+                            <Button variant="outline" size="sm" className="gap-1 h-7" disabled={runM.isPending} onClick={runBackup} title="Retry failed backup">
+                              <RefreshCw className="size-3" /> Retry
                             </Button>
                           ) : "—"}
                         </TableCell>
@@ -903,6 +907,10 @@ function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
                         {j.status === "success" ? (
                           <Button variant="outline" size="sm" className="gap-1 h-7" onClick={() => downloadBackup(j)} title="Download backup">
                             <Download className="size-3" /> Get
+                          </Button>
+                        ) : j.status === "failed" ? (
+                          <Button variant="outline" size="sm" className="gap-1 h-7" disabled={runM.isPending} onClick={runBackup} title="Retry failed backup">
+                            <RefreshCw className="size-3" /> Retry
                           </Button>
                         ) : "—"}
                       </TableCell>
