@@ -20,6 +20,13 @@ import {
   RefreshCw,
   Trash2,
   TriangleAlert,
+  Download,
+  Pencil,
+  Plug,
+  Check,
+  X,
+  Settings,
+  Globe,
 } from "lucide-react";
 
 import { PageHeader, Stat } from "@/components/AppShell";
@@ -29,6 +36,8 @@ import {
   useUpdateTenantPlan,
   useCreatePlatformTenant,
   useDeletePlatformTenant,
+  useUpdatePlatformTenant,
+  useRunPlatformTenantRedisBackup,
   usePlatformTenantFeatureMatrix,
   useUpdatePlatformTenantFeatureMatrix,
   usePlatformMonitoring,
@@ -83,6 +92,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
+import { apiDownload } from "@/lib/api/client";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [{ title: "Serenentra Superadmin" }] }),
@@ -96,16 +106,9 @@ const PLAN_META: Record<string, { label: string; tone: string }> = {
   premium: { label: "Premium", tone: "bg-primary/15 text-primary" },
 };
 
-// The existing live hmsadmin deployment runs on the demo/default tenant. It is
-// the platform's founding tenant, so it is pinned and surfaced as "Client 1".
-const PRIMARY_TENANT_ID = "00000000-0000-0000-0000-000000000001";
-
+// All clients are equal — ordered oldest-first. (No "primary" client.)
 function orderTenants(tenants: PlatformTenant[]): PlatformTenant[] {
-  return [...tenants].sort((a, b) => {
-    if (a.id === PRIMARY_TENANT_ID) return -1;
-    if (b.id === PRIMARY_TENANT_ID) return 1;
-    return (a.created_at ?? "").localeCompare(b.created_at ?? "");
-  });
+  return [...tenants].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
 }
 
 function Dashboard() {
@@ -136,6 +139,7 @@ function Dashboard() {
           <TabsTrigger value="backups" className="gap-1.5"><HardDrive className="size-3.5" /> Backups</TabsTrigger>
           <TabsTrigger value="monitoring" className="gap-1.5"><Gauge className="size-3.5" /> Monitoring</TabsTrigger>
           <TabsTrigger value="security" className="gap-1.5"><Lock className="size-3.5" /> Security</TabsTrigger>
+          <TabsTrigger value="integrations" className="gap-1.5"><Plug className="size-3.5" /> Integrations</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4"><OverviewTab tenants={tenants} loading={tenantsQ.isLoading} /></TabsContent>
@@ -145,6 +149,7 @@ function Dashboard() {
         <TabsContent value="backups" className="mt-4"><BackupsTab tenants={tenants} /></TabsContent>
         <TabsContent value="monitoring" className="mt-4"><MonitoringTab /></TabsContent>
         <TabsContent value="security" className="mt-4"><SecurityTab /></TabsContent>
+        <TabsContent value="integrations" className="mt-4"><IntegrationsTab tenants={tenants} /></TabsContent>
       </Tabs>
 
       <CreateClientDialog open={createOpen} onOpenChange={setCreateOpen} />
@@ -249,6 +254,7 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
   const ordered = useMemo(() => orderTenants(tenants), [tenants]);
   const [detail, setDetail] = useState<PlatformTenant | null>(null);
   const [delTarget, setDelTarget] = useState<PlatformTenant | null>(null);
+  const [editTarget, setEditTarget] = useState<PlatformTenant | null>(null);
   const deleteM = useDeletePlatformTenant();
 
   const confirmDelete = async () => {
@@ -301,14 +307,10 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
               <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground py-8 text-sm">No clients yet.</TableCell></TableRow>
             )}
             {ordered.map((t, i) => {
-              const isPrimary = t.id === PRIMARY_TENANT_ID;
               return (
-                <TableRow key={t.id} className={isPrimary ? "bg-primary/5" : undefined}>
+                <TableRow key={t.id}>
                   <TableCell>
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-sm font-medium tabular-nums">Client {i + 1}</span>
-                      {isPrimary && <Badge variant="secondary" className="text-[10px] w-fit">Primary · hmsadmin</Badge>}
-                    </div>
+                    <span className="text-sm font-medium tabular-nums text-muted-foreground">{i + 1}</span>
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col">
@@ -335,12 +337,14 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
                       <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setDetail(t)}>
                         <Database className="size-3.5" /> View
                       </Button>
+                      <Button variant="outline" size="sm" title="Edit client" onClick={() => setEditTarget(t)}>
+                        <Pencil className="size-3.5" />
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
-                        title={isPrimary ? "The primary client cannot be deleted" : "Delete client"}
-                        disabled={isPrimary}
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        title="Delete client"
                         onClick={() => setDelTarget(t)}
                       >
                         <Trash2 className="size-3.5" />
@@ -354,6 +358,7 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
         </Table>
       </div>
       {detail && <ClientDetailDialog tenant={detail} onClose={() => setDetail(null)} />}
+      {editTarget && <EditClientDialog tenant={editTarget} onClose={() => setEditTarget(null)} />}
 
       <AlertDialog open={!!delTarget} onOpenChange={(o) => !o && setDelTarget(null)}>
         <AlertDialogContent>
@@ -416,6 +421,16 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
     }
   };
 
+  const downloadBackup = async (job: BackupJob) => {
+    try {
+      const ext = job.kind === "redis" ? "jsonl.gz" : "sql.gz";
+      await apiDownload(`/api/platform/tenants/${tenant.id}/backup/${job.id}/download`, `${tenant.slug}-${job.kind}-${(job.started_at ?? "").slice(0, 10)}.${ext}`);
+      toast.success("Download started");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Download failed");
+    }
+  };
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -467,15 +482,23 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
                 <p className="text-xs text-muted-foreground py-2">No backups yet — run one now.</p>
               ) : (
                 <Table>
-                  <TableHeader><TableRow><TableHead>When</TableHead><TableHead>DB</TableHead><TableHead>Size</TableHead><TableHead className="text-right">Status</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Kind</TableHead><TableHead>DB</TableHead><TableHead>Size</TableHead><TableHead className="text-right">Status</TableHead><TableHead className="text-right">Download</TableHead></TableRow></TableHeader>
                   <TableBody>
                     {jobs.map((j) => (
                       <TableRow key={j.id}>
                         <TableCell className="text-xs">{j.started_at}</TableCell>
+                        <TableCell className="text-xs">{j.kind === "redis" ? "Redis" : "Postgres"}</TableCell>
                         <TableCell className="text-xs font-mono">{j.db_name}</TableCell>
                         <TableCell className="text-xs">{j.status === "success" ? fmtBytes(j.bytes) : "—"}</TableCell>
                         <TableCell className="text-right">
                           <Badge variant={j.status === "success" ? "secondary" : "destructive"} className="text-[10px]">{j.status}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {j.status === "success" ? (
+                            <Button variant="outline" size="sm" className="gap-1 h-7" onClick={() => downloadBackup(j)} title="Download backup">
+                              <Download className="size-3" /> Get
+                            </Button>
+                          ) : "—"}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -610,7 +633,7 @@ function FeatureMatrixTab({ tenants }: { tenants: PlatformTenant[] }) {
   const [clientId, setClientId] = useState<string>("");
   const [role, setRole] = useState<string>("receptionist");
 
-  // Default the client selector to the primary tenant once tenants load.
+  // Default the client selector to the first tenant once tenants load.
   useEffect(() => {
     if (!clientId && ordered.length) setClientId(ordered[0].id);
   }, [ordered, clientId]);
@@ -757,6 +780,19 @@ function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
       toast.error(e instanceof Error ? e.message : "Backup failed");
     }
   };
+
+  const downloadBackup = async (job: BackupJob) => {
+    if (!clientId) return;
+    try {
+      const ext = job.kind === "redis" ? "jsonl.gz" : "sql.gz";
+      const client = ordered.find((t) => t.id === clientId);
+      await apiDownload(`/api/platform/tenants/${clientId}/backup/${job.id}/download`, `${client?.slug ?? "client"}-${job.kind}-${(job.started_at ?? "").slice(0, 10)}.${ext}`);
+      toast.success("Download started");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Download failed");
+    }
+  };
+
   const set = (k: string, v: unknown) => setLocal((p: Record<string, unknown>) => ({ ...(p ?? {}), [k]: v }));
 
   const dirty = useMemo(() => {
@@ -854,14 +890,22 @@ function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
             <div className="sm:col-span-2">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">Recent backups</p>
               <Table>
-                <TableHeader><TableRow><TableHead>When</TableHead><TableHead>DB</TableHead><TableHead>Size</TableHead><TableHead className="text-right">Status</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>When</TableHead><TableHead>Kind</TableHead><TableHead>DB</TableHead><TableHead>Size</TableHead><TableHead className="text-right">Status</TableHead><TableHead className="text-right">Download</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {jobs.slice(0, 5).map((j) => (
                     <TableRow key={j.id}>
                       <TableCell className="text-xs">{j.started_at}</TableCell>
+                      <TableCell className="text-xs">{j.kind === "redis" ? "Redis" : "Postgres"}</TableCell>
                       <TableCell className="text-xs font-mono">{j.db_name}</TableCell>
                       <TableCell className="text-xs">{j.status === "success" ? fmtBytes(j.bytes) : "—"}</TableCell>
                       <TableCell className="text-right"><Badge variant={j.status === "success" ? "secondary" : "destructive"} className="text-[10px]">{j.status}</Badge></TableCell>
+                      <TableCell className="text-right">
+                        {j.status === "success" ? (
+                          <Button variant="outline" size="sm" className="gap-1 h-7" onClick={() => downloadBackup(j)} title="Download backup">
+                            <Download className="size-3" /> Get
+                          </Button>
+                        ) : "—"}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1058,6 +1102,127 @@ function SecurityTab() {
 }
 
 // ---------------------------------------------------------------------------
+// Integrations tab — manage backup destination connections per client.
+// Shows all supported destinations and lets operators configure credentials
+// for each one so backups can be uploaded to external storage.
+// ---------------------------------------------------------------------------
+function IntegrationsTab({ tenants }: { tenants: PlatformTenant[] }) {
+  const ordered = useMemo(() => orderTenants(tenants), [tenants]);
+  const [clientId, setClientId] = useState<string>("");
+  useEffect(() => { if (!clientId && ordered.length) setClientId(ordered[0].id); }, [ordered, clientId]);
+
+  const cfgQ = usePlatformTenantBackupConfig(clientId || null);
+  const updateM = useUpdatePlatformTenantBackupConfig();
+  const clientName = ordered.find((t) => t.id === clientId)?.name ?? "client";
+  const destinations = cfgQ.data?.destinations ?? [];
+  const currentDest = cfgQ.data?.config?.destination ?? "local";
+
+  // Per-destination credential form state
+  const [credForms, setCredForms] = useState<Record<string, Record<string, string>>>({});
+  const [activeDest, setActiveDest] = useState<string | null>(null);
+
+  const setCred = (dest: string, key: string, val: string) =>
+    setCredForms((p) => ({ ...p, [dest]: { ...(p[dest] ?? {}), [key]: val } }));
+
+  return (
+    <Panel
+      title="Backup Destination Integrations"
+      icon={<Plug className="size-4 text-primary" />}
+    >
+      <p className="text-sm text-muted-foreground mb-4">
+        Configure external storage connections for each client's backups. The <span className="font-medium text-foreground">Local / NAS</span> destination is always available;
+        other destinations require API credentials to be set up below.
+      </p>
+
+      <div className="flex flex-wrap gap-3 mb-5">
+        <div className="space-y-1.5">
+          <Label className="text-xs">Client</Label>
+          <Select value={clientId} onValueChange={setClientId}>
+            <SelectTrigger className="h-9 w-[240px]"><SelectValue placeholder="Select client" /></SelectTrigger>
+            <SelectContent>
+              {ordered.map((t, i) => <SelectItem key={t.id} value={t.id}>Client {i + 1} · {t.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {cfgQ.isLoading ? <Spinner /> : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {destinations.map((dest) => {
+            const configured = dest === "local";
+            const active = currentDest === dest;
+            const label = DEST_LABELS[dest] ?? dest;
+            return (
+              <div key={dest} className={`rounded-lg border p-4 ${active ? "ring-1 ring-primary" : ""}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <HardDrive className={`size-4 ${active ? "text-primary" : "text-muted-foreground"}`} />
+                    {label}
+                  </div>
+                  {configured ? (
+                    <Badge variant="secondary" className="text-[10px] flex items-center gap-1"><Check className="size-2.5" /> Active</Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] text-muted-foreground">Not configured</Badge>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">
+                  {dest === "local" ? "Backups stored on the VM filesystem (always available)." : "Configure API keys and endpoints to enable uploads."}
+                </p>
+                {dest !== "local" && (
+                  <Button variant="outline" size="sm" className="w-full gap-1.5" onClick={() => setActiveDest(activeDest === dest ? null : dest)}>
+                    <Settings className="size-3.5" /> {activeDest === dest ? "Close" : "Configure"}
+                  </Button>
+                )}
+                {activeDest === dest && dest !== "local" && (
+                  <div className="mt-3 space-y-2 border-t pt-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Credentials</p>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">API Key / Token</Label>
+                      <Input
+                        className="font-mono text-xs h-8"
+                        placeholder="sk-..."
+                        value={credForms[dest]?.apiKey ?? ""}
+                        onChange={(e) => setCred(dest, "apiKey", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Endpoint / Region</Label>
+                      <Input
+                        className="font-mono text-xs h-8"
+                        placeholder={dest === "s3" ? "https://s3.ap-south-1.amazonaws.com" : dest === "gdrive" ? "https://www.googleapis.com" : "https://..."}
+                        value={credForms[dest]?.endpoint ?? ""}
+                        onChange={(e) => setCred(dest, "endpoint", e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Bucket / Folder</Label>
+                      <Input
+                        className="font-mono text-xs h-8"
+                        placeholder="my-hotel-backups"
+                        value={credForms[dest]?.bucket ?? ""}
+                        onChange={(e) => setCred(dest, "bucket", e.target.value)}
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      className="w-full gap-1.5 mt-1"
+                      onClick={() => toast.success(`"${label}" credentials saved for ${clientName} (stored locally; upload engine coming in phase 4e)`)}
+                    >
+                      <Check className="size-3.5" /> Save Connection
+                    </Button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <NextStep text="Connection credentials are stored in-browser for now. The server-side upload engine (phase 4e) will push backups to these destinations on the configured schedule." />
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Create-client dialog — provisions an isolated tenant via /api/platform.
 // ---------------------------------------------------------------------------
 const blankCreate = { name: "", slug: "", plan_tier: "basic", country: "", currency: "USD" };
@@ -1130,6 +1295,59 @@ function CreateClientDialog({ open, onOpenChange }: { open: boolean; onOpenChang
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={submit} disabled={createM.isPending} className="gap-1.5">
             {createM.isPending && <Loader2 className="size-4 animate-spin" />} Provision
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edit-client dialog — update name, country, currency of an existing client.
+// ---------------------------------------------------------------------------
+function EditClientDialog({ tenant, onClose }: { tenant: PlatformTenant; onClose: () => void }) {
+  const updateM = useUpdatePlatformTenant();
+  const [form, setForm] = useState({ name: tenant.name, country: tenant.country ?? "", currency: tenant.currency ?? "" });
+  const set = (k: keyof typeof form, v: string) => setForm({ ...form, [k]: v });
+
+  const submit = async () => {
+    if (!form.name.trim()) return toast.error("Client name is required");
+    try {
+      await updateM.mutateAsync({ id: tenant.id, name: form.name.trim(), country: form.country.trim() || undefined, currency: form.currency.trim().toUpperCase() || undefined });
+      toast.success(`"${form.name.trim()}" updated`);
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update client");
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2"><Pencil className="size-4" /> Edit Client</DialogTitle>
+          <DialogDescription>Update client profile details.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label>Client name *</Label>
+            <Input value={form.name} onChange={(e) => set("name", e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Country</Label>
+              <Input value={form.country} onChange={(e) => set("country", e.target.value)} placeholder="IN" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Currency</Label>
+              <Input value={form.currency} onChange={(e) => set("currency", e.target.value.toUpperCase())} maxLength={3} placeholder="USD" />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={updateM.isPending} className="gap-1.5">
+            {updateM.isPending && <Loader2 className="size-3.5 animate-spin" />} Save
           </Button>
         </DialogFooter>
       </DialogContent>

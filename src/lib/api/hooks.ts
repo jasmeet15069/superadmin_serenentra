@@ -476,13 +476,37 @@ export function useUpdateTenantPlan() {
   });
 }
 
-// Permanently delete a client and all its data. Backend protects the primary tenant.
+// Permanently delete a client and all its data. Backend blocks deleting a client
+// that owns a platform-admin account (self-lockout guard).
 export function useDeletePlatformTenant() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ deleted: boolean; id: string; name: string }>(`/api/platform/tenants/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["platform", "tenants"] }),
+  });
+}
+
+// Edit a client's profile (name / country / currency) — the "update" of CRUD.
+export function useUpdatePlatformTenant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; name?: string; country?: string; currency?: string }) =>
+      apiFetch(`/api/platform/tenants/${id}`, { method: "PUT", body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["platform", "tenants"] }),
+  });
+}
+
+// Run a Redis cache backup (dumps the client's t:<id>:* namespace).
+export function useRunPlatformTenantRedisBackup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ id: string; status: string; keys: number; bytes: number; file: string }>(
+        `/api/platform/tenants/${id}/redis-backup/run`,
+        { method: "POST" },
+      ),
+    onSuccess: (_d, id) => qc.invalidateQueries({ queryKey: ["platform", "backup-history", id] }),
   });
 }
 

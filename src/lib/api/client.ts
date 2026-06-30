@@ -103,6 +103,38 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+// Downloads a file from an authenticated endpoint: fetches with the bearer token,
+// then triggers a browser "Save as" via a blob URL. Refreshes once on a 401.
+export async function apiDownload(path: string, filename: string, _retried = false): Promise<void> {
+  const headers: Record<string, string> = {};
+  const token = getAccessToken();
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(buildUrl(path), { headers });
+  if (res.status === 401 && !_retried) {
+    const t = await refreshAccessToken();
+    if (t) return apiDownload(path, filename, true);
+  }
+  if (!res.ok) {
+    let msg = res.statusText;
+    try {
+      const j = await res.json();
+      msg = j?.error || msg;
+    } catch {
+      /* non-JSON body */
+    }
+    throw new ApiError(res.status, msg || "Download failed");
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export async function apiFetch<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const { method = "GET", body, query, auth = true, _retried = false } = opts;
 

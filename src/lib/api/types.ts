@@ -374,6 +374,7 @@ export interface TenantDetail {
 // A backup run record (GET /api/platform/tenants/:id/backup/history).
 export interface BackupJob {
   id: string;
+  kind: string;
   status: string;
   trigger: string;
   db_name: string;
