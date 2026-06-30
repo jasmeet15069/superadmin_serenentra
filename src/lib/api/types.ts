@@ -346,6 +346,14 @@ export interface FeatureMatrixResponse {
   matrix: Record<string, Record<string, boolean>>;
 }
 
+// Response of GET/PUT /api/platform/plan-features — the configurable plan × feature
+// matrix that decides which modules each plan tier (basic/pro/premium) includes.
+export interface PlanFeaturesResponse {
+  plans: string[];
+  registry: ModuleDef[];
+  matrix: Record<string, Record<string, boolean>>;
+}
+
 // Response of GET /api/platform/tenants/:id/detail — isolation + redacted conn.
 export interface TenantDetail {
   hotel_id: string;

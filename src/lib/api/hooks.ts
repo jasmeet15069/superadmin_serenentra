@@ -15,6 +15,7 @@ import type {
   PosOrderApi,
   TenantModulesResponse,
   FeatureMatrixResponse,
+  PlanFeaturesResponse,
   MonitoringSnapshot,
   SecurityOverview,
   BackupConfig,
@@ -428,6 +429,24 @@ export function usePlatformTenants() {
     queryKey: ["platform", "tenants"] as const,
     queryFn: () => apiFetch<PlatformTenant[] | null>("/api/platform/tenants").then((t) => t ?? []),
     enabled: isAuthenticated(),
+  });
+}
+
+// Configurable plan → feature matrix (which modules each plan tier includes).
+export function usePlatformPlanFeatures() {
+  return useQuery({
+    queryKey: ["platform", "plan-features"] as const,
+    queryFn: () => apiFetch<PlanFeaturesResponse>("/api/platform/plan-features"),
+    enabled: isAuthenticated(),
+  });
+}
+
+export function useUpdatePlatformPlanFeatures() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (matrix: Record<string, Record<string, boolean>>) =>
+      apiFetch<PlanFeaturesResponse>("/api/platform/plan-features", { method: "PUT", body: { matrix } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["platform", "plan-features"] }),
   });
 }
 

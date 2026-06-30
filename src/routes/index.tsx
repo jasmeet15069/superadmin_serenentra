@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   ShieldCheck,
   Building2,
@@ -38,6 +38,8 @@ import {
   usePlatformTenantDetail,
   usePlatformTenantBackupHistory,
   useRunPlatformTenantBackup,
+  usePlatformPlanFeatures,
+  useUpdatePlatformPlanFeatures,
 } from "@/lib/api/hooks";
 import type { PlatformTenant } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
@@ -129,6 +131,7 @@ function Dashboard() {
         <TabsList className="flex-wrap h-auto">
           <TabsTrigger value="overview" className="gap-1.5"><Activity className="size-3.5" /> Overview</TabsTrigger>
           <TabsTrigger value="clients" className="gap-1.5"><Building2 className="size-3.5" /> Clients</TabsTrigger>
+          <TabsTrigger value="plans" className="gap-1.5"><GitBranch className="size-3.5" /> Plans</TabsTrigger>
           <TabsTrigger value="access" className="gap-1.5"><Users2 className="size-3.5" /> Role-Feature Matrix</TabsTrigger>
           <TabsTrigger value="backups" className="gap-1.5"><HardDrive className="size-3.5" /> Backups</TabsTrigger>
           <TabsTrigger value="monitoring" className="gap-1.5"><Gauge className="size-3.5" /> Monitoring</TabsTrigger>
@@ -137,6 +140,7 @@ function Dashboard() {
 
         <TabsContent value="overview" className="mt-4"><OverviewTab tenants={tenants} loading={tenantsQ.isLoading} /></TabsContent>
         <TabsContent value="clients" className="mt-4"><ClientsTab tenants={tenants} loading={tenantsQ.isLoading} /></TabsContent>
+        <TabsContent value="plans" className="mt-4"><PlansTab /></TabsContent>
         <TabsContent value="access" className="mt-4"><FeatureMatrixTab tenants={tenants} /></TabsContent>
         <TabsContent value="backups" className="mt-4"><BackupsTab tenants={tenants} /></TabsContent>
         <TabsContent value="monitoring" className="mt-4"><MonitoringTab /></TabsContent>
@@ -495,6 +499,105 @@ function KV({ k, v }: { k: string; v: React.ReactNode }) {
       <span className="text-muted-foreground">{k}</span>
       <span>{v}</span>
     </div>
+  );
+}
+
+// Plan builder — configure which modules each plan tier (Basic/Pro/Premium)
+// includes. Drives every client portal: a client on a plan gets exactly these
+// features (nav + API), unless further masked per client. Move features between
+// plans in any direction.
+function PlansTab() {
+  const q = usePlatformPlanFeatures();
+  const updateM = useUpdatePlatformPlanFeatures();
+  const plans = q.data?.plans ?? [];
+  const registry = q.data?.registry ?? [];
+
+  const [local, setLocal] = useState<Record<string, Record<string, boolean>> | null>(null);
+  useEffect(() => { if (q.data?.matrix) setLocal(structuredClone(q.data.matrix)); }, [q.data]);
+
+  const groups = useMemo(() => {
+    const g: Record<string, typeof registry> = {};
+    for (const m of registry) (g[m.group] ??= []).push(m);
+    return g;
+  }, [registry]);
+
+  const dirty = useMemo(() => {
+    if (!local || !q.data?.matrix) return false;
+    return JSON.stringify(local) !== JSON.stringify(q.data.matrix);
+  }, [local, q.data]);
+
+  const setCell = (plan: string, feat: string, v: boolean) =>
+    setLocal((p) => {
+      if (!p) return p;
+      return { ...p, [plan]: { ...p[plan], [feat]: v } };
+    });
+
+  const save = async () => {
+    if (!local) return;
+    try {
+      await updateM.mutateAsync(local);
+      toast.success("Plan features saved — applies to all clients on each plan");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save plan features");
+    }
+  };
+
+  return (
+    <Panel
+      title="Plan Builder — features per plan"
+      icon={<GitBranch className="size-4 text-primary" />}
+      action={
+        <Button size="sm" className="gap-1.5" disabled={!dirty || updateM.isPending} onClick={save}>
+          {updateM.isPending && <Loader2 className="size-3.5 animate-spin" />} Save plans
+        </Button>
+      }
+    >
+      <p className="text-sm text-muted-foreground mb-4">
+        Choose which modules each plan tier includes. This drives <span className="font-medium text-foreground">every client portal</span> —
+        a client on a plan sees exactly these features (and the API enforces it). Toggle a feature on for Basic, or off for Pro/Premium — any direction.
+      </p>
+
+      {q.isLoading || !local ? <Spinner /> : (
+        <div className="overflow-x-auto -mx-4">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="min-w-[180px]">Feature</TableHead>
+                {plans.map((p) => (
+                  <TableHead key={p} className="text-center">
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${PLAN_META[p]?.tone ?? ""}`}>{PLAN_META[p]?.label ?? p}</span>
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Object.entries(groups).map(([group, mods]) => (
+                <Fragment key={group}>
+                  <TableRow className="bg-muted/40 hover:bg-muted/40">
+                    <TableCell colSpan={plans.length + 1} className="py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{group}</TableCell>
+                  </TableRow>
+                  {mods.map((m) => (
+                    <TableRow key={m.key}>
+                      <TableCell className="text-sm">{m.label}</TableCell>
+                      {plans.map((p) => (
+                        <TableCell key={p} className="text-center">
+                          <div className="flex justify-center">
+                            <Switch checked={local[p]?.[m.key] !== false} onCheckedChange={(v) => setCell(p, m.key, v)} />
+                          </div>
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </Fragment>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      <div className="mt-3 text-xs text-muted-foreground">
+        Changes apply to all clients on each plan. Per-client overrides live in the client's module mask; per-role limits in the Role-Feature Matrix.
+      </div>
+    </Panel>
   );
 }
 
