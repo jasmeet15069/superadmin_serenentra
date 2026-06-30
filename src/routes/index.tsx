@@ -18,6 +18,8 @@ import {
   Cpu,
   Zap,
   RefreshCw,
+  Trash2,
+  TriangleAlert,
 } from "lucide-react";
 
 import { PageHeader, Stat } from "@/components/AppShell";
@@ -26,6 +28,7 @@ import {
   usePlatformPlans,
   useUpdateTenantPlan,
   useCreatePlatformTenant,
+  useDeletePlatformTenant,
   usePlatformTenantFeatureMatrix,
   useUpdatePlatformTenantFeatureMatrix,
   usePlatformMonitoring,
@@ -52,6 +55,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -231,6 +244,19 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
   const plans = plansQ.data ?? [];
   const ordered = useMemo(() => orderTenants(tenants), [tenants]);
   const [detail, setDetail] = useState<PlatformTenant | null>(null);
+  const [delTarget, setDelTarget] = useState<PlatformTenant | null>(null);
+  const deleteM = useDeletePlatformTenant();
+
+  const confirmDelete = async () => {
+    if (!delTarget) return;
+    try {
+      await deleteM.mutateAsync(delTarget.id);
+      toast.success(`Client "${delTarget.name}" permanently deleted`);
+      setDelTarget(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete client");
+    }
+  };
 
   const changePlan = async (t: PlatformTenant, plan_tier: string) => {
     try {
@@ -262,7 +288,7 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
               <TableHead>Users</TableHead>
               <TableHead>Database</TableHead>
               <TableHead className="text-center">Active</TableHead>
-              <TableHead className="text-right">Detail</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -301,9 +327,21 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
                     <Switch checked={t.is_active} onCheckedChange={(v) => toggleActive(t, v)} />
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setDetail(t)}>
-                      <Database className="size-3.5" /> View
-                    </Button>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setDetail(t)}>
+                        <Database className="size-3.5" /> View
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive hover:bg-destructive/10 hover:text-destructive disabled:opacity-40"
+                        title={isPrimary ? "The primary client cannot be deleted" : "Delete client"}
+                        disabled={isPrimary}
+                        onClick={() => setDelTarget(t)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -312,6 +350,42 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
         </Table>
       </div>
       {detail && <ClientDetailDialog tenant={detail} onClose={() => setDetail(null)} />}
+
+      <AlertDialog open={!!delTarget} onOpenChange={(o) => !o && setDelTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <TriangleAlert className="size-5" /> Delete this client?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm">
+                <p>
+                  You are about to permanently delete <span className="font-semibold text-foreground">{delTarget?.name}</span>{" "}
+                  ({delTarget?.slug}). This <span className="font-semibold text-foreground">cannot be undone</span>.
+                </p>
+                <p>
+                  All of this client's data — rooms, reservations, guests, billing, POS, staff, backups and settings —
+                  will be erased. The client will be removed from the platform.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Tip: if you only want to pause access, use the <span className="font-medium">Active</span> toggle to suspend instead.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteM.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); void confirmDelete(); }}
+              disabled={deleteM.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 gap-1.5"
+            >
+              {deleteM.isPending && <Loader2 className="size-4 animate-spin" />}
+              Delete permanently
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Panel>
   );
 }

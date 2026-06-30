@@ -457,6 +457,16 @@ export function useUpdateTenantPlan() {
   });
 }
 
+// Permanently delete a client and all its data. Backend protects the primary tenant.
+export function useDeletePlatformTenant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ deleted: boolean; id: string; name: string }>(`/api/platform/tenants/${id}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["platform", "tenants"] }),
+  });
+}
+
 export function usePlatformTenantModules(id: string | null) {
   return useQuery({
     queryKey: ["platform", "tenant-modules", id] as const,
