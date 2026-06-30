@@ -21,6 +21,8 @@ import {
   Trash2,
   TriangleAlert,
   Download,
+  FileJson,
+  Package,
   Pencil,
   Plug,
   Check,
@@ -431,6 +433,25 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
     }
   };
 
+  const downloadConfig = async () => {
+    try {
+      await apiDownload(`/api/platform/tenants/${tenant.id}/config.json`, `${tenant.slug}-config.json`);
+      toast.success("Config JSON downloaded");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Download failed");
+    }
+  };
+
+  const downloadBundle = async () => {
+    try {
+      const date = new Date().toISOString().slice(0, 10);
+      await apiDownload(`/api/platform/tenants/${tenant.id}/backup/bundle`, `${tenant.slug}-bundle-${date}.zip`);
+      toast.success("Bundle download started");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Bundle download failed");
+    }
+  };
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -466,12 +487,20 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
 
             {/* Backups */}
             <div className="rounded-lg border p-3">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                 <div className="flex items-center gap-2 text-sm font-medium"><HardDrive className="size-4 text-success" /> Backups</div>
-                <Button size="sm" className="gap-1.5" disabled={runM.isPending} onClick={runBackup}>
-                  {runM.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <HardDrive className="size-3.5" />}
-                  {runM.isPending ? "Backing up…" : "Run backup now"}
-                </Button>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={downloadConfig} title="Download client config.json">
+                    <FileJson className="size-3.5" /> Config JSON
+                  </Button>
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={downloadBundle} title="Download full backup bundle (config + DB + Redis)">
+                    <Package className="size-3.5" /> Full Bundle
+                  </Button>
+                  <Button size="sm" className="gap-1.5" disabled={runM.isPending} onClick={runBackup}>
+                    {runM.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <HardDrive className="size-3.5" />}
+                    {runM.isPending ? "Backing up…" : "Run backup now"}
+                  </Button>
+                </div>
               </div>
               {cfg && (
                 <div className="text-xs text-muted-foreground mb-2">
@@ -797,6 +826,29 @@ function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
     }
   };
 
+  const downloadConfig = async () => {
+    if (!clientId) return;
+    const client = ordered.find((t) => t.id === clientId);
+    try {
+      await apiDownload(`/api/platform/tenants/${clientId}/config.json`, `${client?.slug ?? "client"}-config.json`);
+      toast.success("Config JSON downloaded");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Download failed");
+    }
+  };
+
+  const downloadBundle = async () => {
+    if (!clientId) return;
+    const client = ordered.find((t) => t.id === clientId);
+    const date = new Date().toISOString().slice(0, 10);
+    try {
+      await apiDownload(`/api/platform/tenants/${clientId}/backup/bundle`, `${client?.slug ?? "client"}-bundle-${date}.zip`);
+      toast.success("Bundle download started");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Bundle download failed");
+    }
+  };
+
   const set = (k: string, v: unknown) => setLocal((p: Record<string, unknown>) => ({ ...(p ?? {}), [k]: v }));
 
   const dirty = useMemo(() => {
@@ -882,12 +934,18 @@ function BackupsTab({ tenants }: { tenants: PlatformTenant[] }) {
             <Switch checked={!!local.encrypt} onCheckedChange={(v) => set("encrypt", v)} />
           </label>
 
-          <div className="sm:col-span-2 flex items-center gap-2 border-t pt-4">
+          <div className="sm:col-span-2 flex items-center flex-wrap gap-2 border-t pt-4">
             <Button size="sm" className="gap-1.5" disabled={runM.isPending} onClick={runBackup}>
               {runM.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <HardDrive className="size-3.5" />}
               {runM.isPending ? "Backing up…" : "Run backup now"}
             </Button>
-            <span className="text-xs text-muted-foreground">runs a real pg_dump over the live connection</span>
+            <Button size="sm" variant="outline" className="gap-1.5" disabled={!clientId} onClick={downloadConfig} title="Download client config.json snapshot">
+              <FileJson className="size-3.5" /> Config JSON
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5" disabled={!clientId} onClick={downloadBundle} title="Download ZIP: config + latest DB dump + latest Redis dump">
+              <Package className="size-3.5" /> Full Bundle
+            </Button>
+            <span className="text-xs text-muted-foreground">pg_dump over live connection · config.json includes RLS, features, plan</span>
           </div>
 
           {jobs.length > 0 && (
