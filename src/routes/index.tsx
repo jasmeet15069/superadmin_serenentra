@@ -29,6 +29,7 @@ import {
   X,
   Settings,
   Globe,
+  MemoryStick,
 } from "lucide-react";
 
 import { PageHeader, Stat } from "@/components/AppShell";
@@ -140,6 +141,7 @@ function Dashboard() {
           <TabsTrigger value="access" className="gap-1.5"><Users2 className="size-3.5" /> Role-Feature Matrix</TabsTrigger>
           <TabsTrigger value="backups" className="gap-1.5"><HardDrive className="size-3.5" /> Backups</TabsTrigger>
           <TabsTrigger value="monitoring" className="gap-1.5"><Gauge className="size-3.5" /> Monitoring</TabsTrigger>
+          <TabsTrigger value="machine" className="gap-1.5"><MemoryStick className="size-3.5" /> Machine</TabsTrigger>
           <TabsTrigger value="security" className="gap-1.5"><Lock className="size-3.5" /> Security</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-1.5"><Plug className="size-3.5" /> Integrations</TabsTrigger>
         </TabsList>
@@ -150,6 +152,7 @@ function Dashboard() {
         <TabsContent value="access" className="mt-4"><FeatureMatrixTab tenants={tenants} /></TabsContent>
         <TabsContent value="backups" className="mt-4"><BackupsTab tenants={tenants} /></TabsContent>
         <TabsContent value="monitoring" className="mt-4"><MonitoringTab /></TabsContent>
+        <TabsContent value="machine" className="mt-4"><MachineTab /></TabsContent>
         <TabsContent value="security" className="mt-4"><SecurityTab /></TabsContent>
         <TabsContent value="integrations" className="mt-4"><IntegrationsTab tenants={tenants} /></TabsContent>
       </Tabs>
@@ -1068,6 +1071,126 @@ function MonitoringTab() {
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <RefreshCw className={`size-3 ${q.isFetching ? "animate-spin" : ""}`} />
         Auto-refreshing every 10s · last updated {new Date(d.generated_at).toLocaleTimeString()}
+      </div>
+    </div>
+  );
+}
+
+function MachineTab() {
+  const q = usePlatformMonitoring();
+  const d = q.data;
+  const sys = d?.system;
+
+  const fmtUptime = (s?: number) => {
+    if (!s && s !== 0) return "—";
+    const dd = Math.floor(s / 86400);
+    const hh = Math.floor((s % 86400) / 3600);
+    const mm = Math.floor((s % 3600) / 60);
+    if (dd > 0) return `${dd}d ${hh}h ${mm}m`;
+    if (hh > 0) return `${hh}h ${mm}m`;
+    return `${mm}m`;
+  };
+  const fmtMB = (v?: number) => {
+    if (v == null) return "—";
+    if (v >= 1024) return `${(v / 1024).toFixed(2)} GB`;
+    return `${v.toFixed(0)} MB`;
+  };
+
+  if (q.isLoading || !d) {
+    return <Panel title="Machine Monitoring" icon={<MemoryStick className="size-4 text-info" />}><Spinner /></Panel>;
+  }
+
+  const memUsedPct = sys?.mem_used_pct ?? 0;
+  const swapTotal = sys?.swap_total_mb ?? 0;
+  const swapUsed = sys?.swap_used_mb ?? 0;
+  const swapPct = swapTotal > 0 ? (swapUsed / swapTotal) * 100 : 0;
+  const numCPU = d.runtime?.num_cpu ?? 0;
+  const load1 = sys?.load_1m ?? 0;
+  const cpuUsePct = numCPU > 0 ? Math.min((load1 / numCPU) * 100, 100) : 0;
+
+  const barColor = (pct: number) =>
+    pct > 90 ? "bg-destructive" : pct > 70 ? "bg-warning" : "bg-success";
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* RAM */}
+        <Panel title="RAM Usage" icon={<MemoryStick className="size-4 text-info" />}>
+          <div className="space-y-3">
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-muted-foreground">Used</span>
+                <span className="font-medium">{fmtMB(sys?.mem_used_mb)} / {fmtMB(sys?.mem_total_mb)} ({memUsedPct.toFixed(1)}%)</span>
+              </div>
+              <div className="h-3 rounded-full bg-muted overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${barColor(memUsedPct)}`} style={{ width: `${Math.min(memUsedPct, 100)}%` }} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <MiniStat label="Total" value={fmtMB(sys?.mem_total_mb)} />
+              <MiniStat label="Used" value={fmtMB(sys?.mem_used_mb)} />
+              <MiniStat label="Available" value={fmtMB(sys?.mem_available_mb)} />
+              <MiniStat label="Cached" value={fmtMB(sys?.mem_cached_mb)} />
+              <MiniStat label="Buffers" value={fmtMB(sys?.mem_buffers_mb)} />
+              {swapTotal > 0 && <MiniStat label="Swap Total" value={fmtMB(swapTotal)} />}
+              {swapTotal > 0 && <MiniStat label="Swap Used" value={fmtMB(swapUsed)} />}
+            </div>
+            {swapTotal > 0 && (
+              <div>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-muted-foreground">Swap</span>
+                  <span className="font-medium">{swapPct.toFixed(1)}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${barColor(swapPct)}`} style={{ width: `${Math.min(swapPct, 100)}%` }} />
+                </div>
+              </div>
+            )}
+          </div>
+        </Panel>
+
+        {/* CPU / Load */}
+        <Panel title="CPU Load" icon={<Cpu className="size-4 text-primary" />}>
+          <div className="space-y-3">
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-muted-foreground">Estimated utilisation (load/cores)</span>
+                <span className="font-medium">{cpuUsePct.toFixed(1)}%</span>
+              </div>
+              <div className="h-3 rounded-full bg-muted overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${barColor(cpuUsePct)}`} style={{ width: `${Math.min(cpuUsePct, 100)}%` }} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <MiniStat label="Logical CPUs" value={numCPU} />
+              <MiniStat label="Load 1m" value={sys?.load_1m?.toFixed(2) ?? "—"} />
+              <MiniStat label="Load 5m" value={sys?.load_5m?.toFixed(2) ?? "—"} />
+              <MiniStat label="Load 15m" value={sys?.load_15m?.toFixed(2) ?? "—"} />
+              <MiniStat label="Running Procs" value={sys?.procs_running ?? "—"} />
+              <MiniStat label="Total Procs" value={sys?.procs_total ?? "—"} />
+            </div>
+          </div>
+        </Panel>
+
+        {/* OS Uptime */}
+        <Panel title="System" icon={<Server className="size-4 text-success" />}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <MiniStat label="OS Uptime" value={fmtUptime(sys?.uptime_seconds)} />
+            <MiniStat label="App Uptime" value={fmtUptime(d.app?.uptime_seconds)} />
+            <MiniStat label="Go Version" value={d.runtime?.go_version?.replace("go", "") ?? "—"} />
+            <MiniStat label="Goroutines" value={d.runtime?.goroutines ?? "—"} />
+            <MiniStat label="Go Mem Alloc" value={fmtMB(d.runtime?.mem_alloc_mb)} />
+            <MiniStat label="Go Mem Sys" value={fmtMB(d.runtime?.mem_sys_mb)} />
+          </div>
+        </Panel>
+      </div>
+
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <RefreshCw className={`size-3 ${q.isFetching ? "animate-spin" : ""}`} />
+        Auto-refreshing every 10s · last updated {new Date(d.generated_at).toLocaleTimeString()}
+        {!sys?.mem_total_mb && (
+          <span className="ml-2 text-warning-foreground">⚠ /proc not available — running on non-Linux host</span>
+        )}
       </div>
     </div>
   );

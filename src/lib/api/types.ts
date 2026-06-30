@@ -431,6 +431,22 @@ export interface MonitoringSnapshot {
     heap_objects: number;
     gc_runs: number;
   };
+  system?: {
+    mem_total_mb?: number;
+    mem_used_mb?: number;
+    mem_available_mb?: number;
+    mem_buffers_mb?: number;
+    mem_cached_mb?: number;
+    mem_used_pct?: number;
+    swap_total_mb?: number;
+    swap_used_mb?: number;
+    load_1m?: number;
+    load_5m?: number;
+    load_15m?: number;
+    procs_running?: number;
+    procs_total?: number;
+    uptime_seconds?: number;
+  };
   postgres: {
     status: "up" | "down";
     ping_ms?: number;
