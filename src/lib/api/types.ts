@@ -545,6 +545,19 @@ export interface PosOrderApi {
   updated_at: string;
 }
 
+export interface DemoLead {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  property_name: string;
+  rooms: string;
+  country: string | null;
+  message: string | null;
+  status: string;
+  created_at: string;
+}
+
 export interface CreatePosOrderBody {
   outlet: string;
   channel?: string | null;

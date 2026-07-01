@@ -30,6 +30,11 @@ import {
   Settings,
   Globe,
   MemoryStick,
+  Inbox,
+  Mail,
+  Phone,
+  ExternalLink,
+  MessageSquare,
 } from "lucide-react";
 
 import { PageHeader, Stat } from "@/components/AppShell";
@@ -52,8 +57,9 @@ import {
   useRunPlatformTenantBackup,
   usePlatformPlanFeatures,
   useUpdatePlatformPlanFeatures,
+  useDemoLeads,
 } from "@/lib/api/hooks";
-import type { PlatformTenant, BackupJob } from "@/lib/api/types";
+import type { PlatformTenant, BackupJob, DemoLead } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -144,6 +150,7 @@ function Dashboard() {
           <TabsTrigger value="machine" className="gap-1.5"><MemoryStick className="size-3.5" /> Machine</TabsTrigger>
           <TabsTrigger value="security" className="gap-1.5"><Lock className="size-3.5" /> Security</TabsTrigger>
           <TabsTrigger value="integrations" className="gap-1.5"><Plug className="size-3.5" /> Integrations</TabsTrigger>
+          <TabsTrigger value="demo-leads" className="gap-1.5"><Inbox className="size-3.5" /> Demo Leads</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4"><OverviewTab tenants={tenants} loading={tenantsQ.isLoading} /></TabsContent>
@@ -155,6 +162,7 @@ function Dashboard() {
         <TabsContent value="machine" className="mt-4"><MachineTab /></TabsContent>
         <TabsContent value="security" className="mt-4"><SecurityTab /></TabsContent>
         <TabsContent value="integrations" className="mt-4"><IntegrationsTab tenants={tenants} /></TabsContent>
+        <TabsContent value="demo-leads" className="mt-4"><DemoLeadsTab /></TabsContent>
       </Tabs>
 
       <CreateClientDialog open={createOpen} onOpenChange={setCreateOpen} />
@@ -1596,6 +1604,103 @@ function NextStep({ text }: { text: string }) {
   return (
     <div className="mt-4 rounded-md bg-muted/40 border border-dashed px-3 py-2 text-xs text-muted-foreground">
       <span className="font-medium text-foreground">Next:</span> {text}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Demo Leads Tab
+// ---------------------------------------------------------------------------
+const STATUS_COLORS: Record<string, string> = {
+  new: "bg-blue-100 text-blue-700",
+  contacted: "bg-yellow-100 text-yellow-700",
+  converted: "bg-green-100 text-green-700",
+  closed: "bg-gray-100 text-gray-500",
+};
+
+function DemoLeadsTab() {
+  const q = useDemoLeads();
+  const leads: DemoLead[] = q.data ?? [];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Demo Requests</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Leads submitted via the Serenentra landing page. Auto-refreshes every 60 s.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary">{leads.length} total</Badge>
+          <Badge className="bg-blue-100 text-blue-700 border-0">
+            {leads.filter((l) => l.status === "new").length} new
+          </Badge>
+        </div>
+      </div>
+
+      {q.isLoading ? (
+        <Spinner />
+      ) : leads.length === 0 ? (
+        <Empty text="No demo requests yet. Share the landing page to start getting leads." />
+      ) : (
+        <div className="rounded-xl border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Contact</TableHead>
+                <TableHead>Property</TableHead>
+                <TableHead>Rooms</TableHead>
+                <TableHead>Country</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Received</TableHead>
+                <TableHead>Message</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {leads.map((lead) => (
+                <TableRow key={lead.id}>
+                  <TableCell>
+                    <div className="font-medium text-sm">{lead.name}</div>
+                    <a
+                      href={`mailto:${lead.email}`}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary mt-0.5"
+                    >
+                      <Mail className="size-3" /> {lead.email}
+                    </a>
+                    {lead.phone && (
+                      <a
+                        href={`tel:${lead.phone}`}
+                        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary mt-0.5"
+                      >
+                        <Phone className="size-3" /> {lead.phone}
+                      </a>
+                    )}
+                  </TableCell>
+                  <TableCell className="font-medium text-sm">{lead.property_name}</TableCell>
+                  <TableCell className="text-sm">{lead.rooms}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{lead.country ?? "—"}</TableCell>
+                  <TableCell>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[lead.status] ?? "bg-muted text-muted-foreground"}`}>
+                      {lead.status}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                    {new Date(lead.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                  </TableCell>
+                  <TableCell className="max-w-xs">
+                    {lead.message ? (
+                      <span className="text-xs text-muted-foreground line-clamp-2">{lead.message}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/40">—</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
     </div>
   );
 }

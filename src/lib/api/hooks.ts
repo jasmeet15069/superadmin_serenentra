@@ -44,6 +44,7 @@ import type {
   Room,
   RoomStatus,
   Session,
+  DemoLead,
 } from "./types";
 
 export const queryKeys = {
@@ -655,5 +656,14 @@ export function useDeletePosOrder() {
   return useMutation({
     mutationFn: (id: string) => apiFetch(`/api/pos/orders/${id}`, { method: "DELETE" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["pos", "orders"] }),
+  });
+}
+
+export function useDemoLeads() {
+  return useQuery({
+    queryKey: ["platform", "demo-leads"] as const,
+    queryFn: () => apiFetch<DemoLead[]>("/api/demo-requests").then((d) => d ?? []),
+    enabled: isAuthenticated(),
+    refetchInterval: 60_000,
   });
 }
