@@ -45,6 +45,7 @@ import type {
   RoomStatus,
   Session,
   DemoLead,
+  ProvisionStatus,
 } from "./types";
 
 export const queryKeys = {
@@ -463,8 +464,21 @@ export function usePlatformPlans() {
 export function useCreatePlatformTenant() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateTenantBody) => apiFetch("/api/platform/tenants", { method: "POST", body }),
+    mutationFn: (body: CreateTenantBody) =>
+      apiFetch<{ id: string; provision_job_id?: string }>("/api/platform/tenants", { method: "POST", body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["platform", "tenants"] }),
+  });
+}
+
+export function useProvisionStatus(tenantId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["platform", "provision-status", tenantId] as const,
+    queryFn: () => apiFetch<ProvisionStatus>(`/api/platform/tenants/${tenantId}/provision-status`),
+    enabled: !!tenantId && enabled && isAuthenticated(),
+    refetchInterval: (q) => {
+      const status = q.state.data?.status;
+      return status === 'done' || status === 'failed' ? false : 2000;
+    },
   });
 }
 

@@ -545,6 +545,24 @@ export interface PosOrderApi {
   updated_at: string;
 }
 
+export interface ProvisionStep {
+  name: string;
+  status: 'done' | 'failed' | 'skipped';
+  error?: string;
+  at: string;
+}
+
+export interface ProvisionStatus {
+  job_id: string | null;
+  status: 'running' | 'done' | 'failed' | null;
+  steps: ProvisionStep[];
+  vercel_project_id: string | null;
+  vercel_domain: string | null;
+  dns_record_id: string | null;
+  provision_status: string;
+  error: string | null;
+}
+
 export interface DemoLead {
   id: string;
   name: string;

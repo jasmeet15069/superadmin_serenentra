@@ -43,6 +43,7 @@ import {
   usePlatformPlans,
   useUpdateTenantPlan,
   useCreatePlatformTenant,
+  useProvisionStatus,
   useDeletePlatformTenant,
   useUpdatePlatformTenant,
   useRunPlatformTenantRedisBackup,
@@ -59,7 +60,7 @@ import {
   useUpdatePlatformPlanFeatures,
   useDemoLeads,
 } from "@/lib/api/hooks";
-import type { PlatformTenant, BackupJob, DemoLead } from "@/lib/api/types";
+import type { PlatformTenant, BackupJob, DemoLead, ProvisionStep } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -1424,75 +1425,178 @@ function IntegrationsTab({ tenants }: { tenants: PlatformTenant[] }) {
 // ---------------------------------------------------------------------------
 const blankCreate = { name: "", slug: "", plan_tier: "basic", country: "", currency: "USD" };
 
+const PROVISION_STEP_LABELS: Record<string, string> = {
+  db: "Dedicated PostgreSQL database",
+  dns: "Cloudflare DNS record",
+  vercel: "Vercel project",
+  "vercel-env": "Environment variables",
+  "vercel-domain": "Custom domain",
+  "vercel-deploy": "Initial deployment",
+};
+
+function ProvisionStepRow({ step }: { step: ProvisionStep }) {
+  const label = PROVISION_STEP_LABELS[step.name] ?? step.name;
+  return (
+    <div className="flex items-start gap-2.5 text-sm">
+      {step.status === "done" && <Check className="size-4 text-green-500 mt-0.5 shrink-0" />}
+      {step.status === "failed" && <X className="size-4 text-red-500 mt-0.5 shrink-0" />}
+      {step.status === "skipped" && <CircleDot className="size-4 text-muted-foreground mt-0.5 shrink-0" />}
+      <div>
+        <span className={step.status === "failed" ? "text-red-600" : step.status === "skipped" ? "text-muted-foreground" : ""}>{label}</span>
+        {step.error && <p className="text-xs text-red-500 mt-0.5">{step.error}</p>}
+      </div>
+    </div>
+  );
+}
+
 function CreateClientDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const plansQ = usePlatformPlans();
   const createM = useCreatePlatformTenant();
   const plans = plansQ.data ?? [];
   const [form, setForm] = useState(blankCreate);
+  const [newTenantId, setNewTenantId] = useState<string | null>(null);
+  const [provisioning, setProvisioning] = useState(false);
   const set = (k: keyof typeof blankCreate, v: string) => setForm({ ...form, [k]: v });
 
-  useEffect(() => { if (!open) setForm(blankCreate); }, [open]);
+  const provQ = useProvisionStatus(newTenantId, provisioning);
+  const provData = provQ.data;
+  const provDone = provData?.status === "done" || provData?.status === "failed";
+
+  useEffect(() => {
+    if (!open) {
+      setForm(blankCreate);
+      setNewTenantId(null);
+      setProvisioning(false);
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (provDone && provData?.status === "done") {
+      toast.success("Client fully provisioned — portal is live!");
+    }
+  }, [provDone, provData?.status]);
 
   const submit = async () => {
     if (!form.name.trim()) return toast.error("Client name is required");
     try {
-      await createM.mutateAsync({
+      const result = await createM.mutateAsync({
         name: form.name.trim(),
         slug: form.slug.trim() || undefined,
         plan_tier: form.plan_tier,
         country: form.country.trim() || undefined,
         currency: form.currency.trim() || undefined,
-      } as never);
-      toast.success(`Client "${form.name.trim()}" provisioned`);
-      onOpenChange(false);
+      } as never) as { id: string; provision_job_id?: string };
+      setNewTenantId(result.id);
+      setProvisioning(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create client");
     }
   };
 
+  const steps = provData?.steps ?? [];
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={provisioning && !provDone ? undefined : onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Building2 className="size-4" /> Provision New Client</DialogTitle>
-          <DialogDescription>Creates an isolated hotel tenant on the platform.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2">
+            <Building2 className="size-4" />
+            {provisioning ? "Provisioning client…" : "Provision New Client"}
+          </DialogTitle>
+          <DialogDescription>
+            {provisioning
+              ? "Setting up isolated database, DNS, and portal. This takes ~30 seconds."
+              : "Creates a fully isolated hotel tenant with dedicated database and portal."}
+          </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label>Client / Hotel name *</Label>
-            <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Seaside Resort" />
+
+        {!provisioning ? (
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Client / Hotel name *</Label>
+              <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Seaside Resort" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Slug</Label>
+                <Input value={form.slug} onChange={(e) => set("slug", e.target.value)} placeholder="auto from name" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Plan</Label>
+                <Select value={form.plan_tier} onValueChange={(v) => set("plan_tier", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {plans.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Country</Label>
+                <Input value={form.country} onChange={(e) => set("country", e.target.value)} placeholder="IN" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Currency</Label>
+                <Input value={form.currency} onChange={(e) => set("currency", e.target.value.toUpperCase())} maxLength={3} placeholder="USD" />
+              </div>
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Slug</Label>
-              <Input value={form.slug} onChange={(e) => set("slug", e.target.value)} placeholder="auto from name" />
+        ) : (
+          <div className="space-y-3 py-1">
+            {/* Overall status bar */}
+            <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium ${
+              provData?.status === "done" ? "bg-green-50 text-green-700" :
+              provData?.status === "failed" ? "bg-red-50 text-red-700" :
+              "bg-blue-50 text-blue-700"
+            }`}>
+              {!provDone && <Loader2 className="size-4 animate-spin" />}
+              {provData?.status === "done" && <Check className="size-4" />}
+              {provData?.status === "failed" && <X className="size-4" />}
+              {provData?.status === "done" ? "All systems provisioned" :
+               provData?.status === "failed" ? "Provisioning failed on a step" :
+               "Provisioning in progress…"}
             </div>
-            <div className="space-y-1.5">
-              <Label>Plan</Label>
-              <Select value={form.plan_tier} onValueChange={(v) => set("plan_tier", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {plans.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+
+            {/* Step list */}
+            <div className="space-y-2 rounded-lg border bg-muted/30 px-3 py-3">
+              {steps.length === 0 ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" /> Starting…
+                </div>
+              ) : (
+                steps.map((s, i) => <ProvisionStepRow key={i} step={s} />)
+              )}
             </div>
+
+            {/* Portal URL when done */}
+            {provData?.vercel_domain && (
+              <a
+                href={`https://${provData.vercel_domain}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary hover:bg-primary/10"
+              >
+                <ExternalLink className="size-3.5" />
+                {provData.vercel_domain}
+              </a>
+            )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Country</Label>
-              <Input value={form.country} onChange={(e) => set("country", e.target.value)} placeholder="IN" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Currency</Label>
-              <Input value={form.currency} onChange={(e) => set("currency", e.target.value.toUpperCase())} maxLength={3} placeholder="USD" />
-            </div>
-          </div>
-        </div>
+        )}
+
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={createM.isPending} className="gap-1.5">
-            {createM.isPending && <Loader2 className="size-4 animate-spin" />} Provision
-          </Button>
+          {!provisioning ? (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button onClick={submit} disabled={createM.isPending} className="gap-1.5">
+                {createM.isPending && <Loader2 className="size-4 animate-spin" />} Provision
+              </Button>
+            </>
+          ) : (
+            <Button onClick={() => onOpenChange(false)} disabled={!provDone} variant={provDone ? "default" : "outline"}>
+              {provDone ? "Done" : "Please wait…"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
