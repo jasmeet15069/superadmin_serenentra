@@ -254,7 +254,7 @@ function OverviewTab({ tenants, loading }: { tenants: PlatformTenant[]; loading:
           <MiniStat label="Isolated Databases" value={loading ? "—" : tenants.filter((t) => t.database_name).length} />
           <MiniStat label="Shared-mode Tenants" value={loading ? "—" : tenants.filter((t) => !t.database_name).length} />
           <MiniStat label="Redis Namespaces" value={loading ? "—" : tenants.length} hint="t:{id}:*" />
-          <MiniStat label="Console" value="superadminhms" hint="172.105.41.151" />
+          <MiniStat label="Console" value={typeof window !== "undefined" ? window.location.hostname : "superadmin"} />
         </div>
       </Panel>
     </div>
@@ -1427,11 +1427,8 @@ const blankCreate = { name: "", slug: "", plan_tier: "basic", country: "", curre
 
 const PROVISION_STEP_LABELS: Record<string, string> = {
   db: "Dedicated PostgreSQL database",
-  dns: "Cloudflare DNS record",
-  vercel: "Vercel project",
-  "vercel-env": "Environment variables",
-  "vercel-domain": "Custom domain",
-  "vercel-deploy": "Initial deployment",
+  dns: "GoDaddy DNS A record",
+  nginx: "Nginx config + SSL certificate",
 };
 
 function ProvisionStepRow({ step }: { step: ProvisionStep }) {
