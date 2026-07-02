@@ -1475,6 +1475,7 @@ const PROVISION_STEP_LABELS: Record<string, string> = {
   db: "Dedicated PostgreSQL database",
   dns: "GoDaddy DNS A record",
   nginx: "Nginx config + SSL certificate",
+  redis: "Redis cache namespace",
 };
 
 function ProvisionStepRow({ step }: { step: ProvisionStep }) {
