@@ -58,6 +58,9 @@ export default function AppShell() {
             Serenentra <span className="text-muted-foreground font-normal">Superadmin</span>
           </Link>
           <div className="ml-auto flex items-center gap-3">
+            <span className="hidden sm:inline text-[11px] font-mono text-muted-foreground border border-dashed rounded px-1.5 py-0.5 select-none">
+              (IPPF VPS)
+            </span>
             {user && (
               <span className="hidden sm:inline text-sm text-muted-foreground">{user.email}</span>
             )}
