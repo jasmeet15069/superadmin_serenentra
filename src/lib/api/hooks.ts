@@ -46,6 +46,7 @@ import type {
   Session,
   DemoLead,
   ProvisionStatus,
+  TenantConfigSnapshot,
 } from "./types";
 
 export const queryKeys = {
@@ -487,7 +488,10 @@ export function useUpdateTenantPlan() {
   return useMutation({
     mutationFn: ({ id, plan_tier, is_active }: { id: string; plan_tier: string; is_active?: boolean }) =>
       apiFetch(`/api/platform/tenants/${id}/plan`, { method: "PUT", body: { plan_tier, is_active } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["platform", "tenants"] }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["platform", "tenants"] });
+      qc.invalidateQueries({ queryKey: ["platform", "tenant-config", v.id] });
+    },
   });
 }
 
@@ -508,7 +512,10 @@ export function useUpdatePlatformTenant() {
   return useMutation({
     mutationFn: ({ id, ...body }: { id: string; name?: string; country?: string; currency?: string }) =>
       apiFetch(`/api/platform/tenants/${id}`, { method: "PUT", body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["platform", "tenants"] }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["platform", "tenants"] });
+      qc.invalidateQueries({ queryKey: ["platform", "tenant-config", v.id] });
+    },
   });
 }
 
@@ -585,7 +592,10 @@ export function useUpdatePlatformTenantBackupConfig() {
         method: "PUT",
         body: config,
       }),
-    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ["platform", "backup-config", v.id] }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["platform", "backup-config", v.id] });
+      qc.invalidateQueries({ queryKey: ["platform", "tenant-config", v.id] });
+    },
   });
 }
 
@@ -615,8 +625,10 @@ export function useUpdatePlatformTenantFeatureMatrix() {
         method: "PUT",
         body: { matrix },
       }),
-    onSuccess: (_d, v) =>
-      qc.invalidateQueries({ queryKey: ["platform", "feature-matrix", v.id] }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["platform", "feature-matrix", v.id] });
+      qc.invalidateQueries({ queryKey: ["platform", "tenant-config", v.id] });
+    },
   });
 }
 
@@ -628,7 +640,20 @@ export function useUpdatePlatformTenantModules() {
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ["platform", "tenant-modules", v.id] });
       qc.invalidateQueries({ queryKey: ["tenant", "modules"] });
+      qc.invalidateQueries({ queryKey: ["platform", "tenant-config", v.id] });
     },
+  });
+}
+
+// Persistent per-client config snapshot — auto-saved after every superadmin mutation.
+// Each client has its own isolated entry: dedicated DB, Redis namespace, plan, modules,
+// role-feature matrix, and backup policy. Falls back to a fresh build if none stored.
+export function usePlatformTenantConfig(id: string | null) {
+  return useQuery({
+    queryKey: ["platform", "tenant-config", id] as const,
+    queryFn: () => apiFetch<TenantConfigSnapshot>(`/api/platform/tenants/${id}/config`),
+    enabled: !!id && isAuthenticated(),
+    staleTime: 30_000,
   });
 }
 

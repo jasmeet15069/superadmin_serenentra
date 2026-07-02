@@ -59,6 +59,7 @@ import {
   usePlatformPlanFeatures,
   useUpdatePlatformPlanFeatures,
   useDemoLeads,
+  usePlatformTenantConfig,
 } from "@/lib/api/hooks";
 import type { PlatformTenant, BackupJob, DemoLead, ProvisionStep } from "@/lib/api/types";
 import { Button } from "@/components/ui/button";
@@ -426,6 +427,7 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
 function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClose: () => void }) {
   const detailQ = usePlatformTenantDetail(tenant.id);
   const cfgQ = usePlatformTenantBackupConfig(tenant.id);
+  const configQ = usePlatformTenantConfig(tenant.id);
   const historyQ = usePlatformTenantBackupHistory(tenant.id);
   const provQ = useProvisionStatus(tenant.id, true);
   const runM = useRunPlatformTenantBackup();
@@ -543,6 +545,9 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
               <KV k="Namespace" v={<span className="font-mono text-xs">{d.redis_namespace}</span>} />
             </div>
 
+            {/* Configuration Snapshot */}
+            <ConfigSnapshotPanel snap={configQ.data ?? null} loading={configQ.isLoading} />
+
             {/* Backups */}
             <div className="rounded-lg border p-3">
               <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -604,6 +609,87 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Inline configuration snapshot for a client — shows the persisted config.json
+// content that is auto-saved after every superadmin mutation. Each client has
+// fully isolated entries: dedicated DB, Redis namespace, plan, modules, matrix.
+function ConfigSnapshotPanel({ snap, loading }: { snap: import("@/lib/api/types").TenantConfigSnapshot | null; loading: boolean }) {
+  const [showRaw, setShowRaw] = useState(false);
+  return (
+    <div className="rounded-lg border p-3">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Settings className="size-4 text-primary" /> Configuration Snapshot
+        </div>
+        {snap && (
+          <button
+            className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+            onClick={() => setShowRaw((v) => !v)}
+          >
+            {showRaw ? "Summary" : "Raw JSON"}
+          </button>
+        )}
+      </div>
+
+      {loading && <div className="text-xs text-muted-foreground py-1">Loading…</div>}
+
+      {!loading && !snap && (
+        <div className="text-xs text-muted-foreground py-1">No config saved yet — changes will auto-save next mutation.</div>
+      )}
+
+      {!loading && snap && !showRaw && (
+        <div className="space-y-2 text-sm">
+          {/* Identity */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <KV k="Plan" v={<Badge variant="secondary" className="text-[10px] capitalize">{snap.tenant.plan_tier}</Badge>} />
+            <KV k="Status" v={<Badge variant={snap.tenant.is_active ? "default" : "destructive"} className="text-[10px]">{snap.tenant.is_active ? "Active" : "Suspended"}</Badge>} />
+            <KV k="Country" v={<span className="font-mono text-xs">{snap.tenant.country ?? "—"}</span>} />
+            <KV k="Currency" v={<span className="font-mono text-xs">{snap.tenant.currency ?? "—"}</span>} />
+          </div>
+          {/* Infrastructure */}
+          <div className="border-t pt-2 grid grid-cols-1 gap-y-1">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">Infrastructure</p>
+            <KV k="DB" v={<span className="font-mono text-xs">{snap.rls.db_name}</span>} />
+            <KV k="Isolation" v={<Badge variant={snap.rls.isolation_mode === "dedicated" ? "default" : "secondary"} className="text-[10px] capitalize">{snap.rls.isolation_mode}</Badge>} />
+            <KV k="Redis" v={<span className="font-mono text-xs">{snap.rls.redis_namespace}</span>} />
+            <KV k="DNS" v={<span className="font-mono text-xs">{snap.tenant.slug}.serenentra.com</span>} />
+          </div>
+          {/* Modules */}
+          <div className="border-t pt-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Modules</p>
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(snap.features.enabled_modules)
+                .filter(([, v]) => v)
+                .map(([k]) => (
+                  <span key={k} className="text-[10px] bg-primary/10 text-primary rounded px-1.5 py-0.5 font-mono">{k}</span>
+                ))}
+            </div>
+            {Object.values(snap.features.enabled_modules).filter(Boolean).length === 0 && (
+              <span className="text-xs text-muted-foreground">None enabled</span>
+            )}
+          </div>
+          {/* Backup */}
+          <div className="border-t pt-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-0.5">Backup Policy</p>
+            <KV k="Enabled" v={<Badge variant={snap.backup_policy.enabled ? "default" : "secondary"} className="text-[10px]">{snap.backup_policy.enabled ? "On" : "Off"}</Badge>} />
+            <KV k="Destination" v={<span className="font-mono text-xs">{snap.backup_policy.destination}</span>} />
+            <KV k="Schedule" v={<span className="font-mono text-xs">{snap.backup_policy.cron_expr}</span>} />
+            <KV k="Retention" v={<span className="font-mono text-xs">{snap.backup_policy.retention_days}d</span>} />
+          </div>
+          <div className="text-[10px] text-muted-foreground pt-1">
+            Snapshot: {new Date(snap.generated_at).toLocaleString()} · v{snap.version}
+          </div>
+        </div>
+      )}
+
+      {!loading && snap && showRaw && (
+        <pre className="text-[10px] font-mono bg-muted/40 rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap break-all">
+          {JSON.stringify(snap, null, 2)}
+        </pre>
+      )}
+    </div>
   );
 }
 

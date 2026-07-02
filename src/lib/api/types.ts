@@ -576,6 +576,50 @@ export interface DemoLead {
   created_at: string;
 }
 
+// Persistent per-client configuration snapshot (GET /api/platform/tenants/:id/config).
+// Mirrored from the Go TenantConfigSnapshot struct in config_handler.go.
+// Auto-saved to tenant_configs table after every superadmin mutation.
+export interface TenantConfigSnapshot {
+  version: string;
+  generated_at: string;
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+    plan_tier: string;
+    is_active: boolean;
+    country: string | null;
+    currency: string | null;
+    rooms_max: number | null;
+    users_max: number | null;
+    properties_max: number | null;
+    created_at: string;
+  };
+  rls: {
+    isolation_mode: string;
+    db_name: string;
+    redis_namespace: string;
+    scoped_by: string;
+  };
+  features: {
+    enabled_modules: Record<string, boolean>;
+    overrides: Record<string, boolean>;
+  };
+  feature_matrix: {
+    roles: string[];
+    matrix: Record<string, Record<string, boolean>>;
+  };
+  backup_policy: {
+    hotel_id: string;
+    enabled: boolean;
+    cron_expr: string;
+    destination: string;
+    retention_days: number;
+    encrypt: boolean;
+    notify_email: string;
+  };
+}
+
 export interface CreatePosOrderBody {
   outlet: string;
   channel?: string | null;
