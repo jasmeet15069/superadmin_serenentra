@@ -330,6 +330,14 @@ function ClientsTab({ tenants, loading }: { tenants: PlatformTenant[]; loading: 
                     <div className="flex flex-col">
                       <span className="font-medium">{t.name}</span>
                       <span className="text-xs text-muted-foreground">{t.slug} · {t.currency ?? "—"}</span>
+                      <a
+                        href={`https://${t.slug}.serenentra.com`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-primary hover:underline flex items-center gap-0.5 mt-0.5"
+                      >
+                        {t.slug}.serenentra.com <ExternalLink className="size-2.5" />
+                      </a>
                     </div>
                   </TableCell>
                   <TableCell>
@@ -419,8 +427,10 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
   const detailQ = usePlatformTenantDetail(tenant.id);
   const cfgQ = usePlatformTenantBackupConfig(tenant.id);
   const historyQ = usePlatformTenantBackupHistory(tenant.id);
+  const provQ = useProvisionStatus(tenant.id, true);
   const runM = useRunPlatformTenantBackup();
   const d = detailQ.data;
+  const prov = provQ.data;
   const cfg = cfgQ.data?.config;
   const jobs = historyQ.data?.jobs ?? [];
 
@@ -472,11 +482,47 @@ function ClientDetailDialog({ tenant, onClose }: { tenant: PlatformTenant; onClo
             <Database className="size-4" /> {tenant.name}
             <Badge variant="secondary" className="ml-1 text-[10px]">{tenant.plan_tier}</Badge>
           </DialogTitle>
-          <DialogDescription>Isolated database, cache namespace, connection, and backups.</DialogDescription>
+          <DialogDescription>Portal URL, database, cache, and backups.</DialogDescription>
         </DialogHeader>
 
         {!d ? <Spinner /> : (
           <div className="space-y-4">
+            {/* Portal URL */}
+            <div className="rounded-lg border p-3">
+              <div className="flex items-center gap-2 text-sm font-medium mb-2"><Globe className="size-4 text-primary" /> Portal</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                <KV k="Slug" v={<span className="font-mono text-xs">{tenant.slug}</span>} />
+                <KV k="Status" v={
+                  prov ? (
+                    <Badge
+                      variant={prov.provision_status === "done" ? "default" : prov.provision_status === "failed" ? "destructive" : "secondary"}
+                      className="text-[10px] capitalize"
+                    >
+                      {prov.provision_status ?? "unknown"}
+                    </Badge>
+                  ) : <span className="text-xs text-muted-foreground">—</span>
+                } />
+                {(prov?.vercel_domain || tenant.slug) && (
+                  <div className="col-span-2">
+                    <KV k="URL" v={
+                      <a
+                        href={`https://${prov?.vercel_domain ?? `${tenant.slug}.serenentra.com`}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-mono text-xs text-primary hover:underline flex items-center gap-1"
+                      >
+                        {prov?.vercel_domain ?? `${tenant.slug}.serenentra.com`}
+                        <ExternalLink className="size-3" />
+                      </a>
+                    } />
+                  </div>
+                )}
+                {prov?.dns_record_id && (
+                  <KV k="DNS record" v={<span className="font-mono text-xs">{prov.dns_record_id}</span>} />
+                )}
+              </div>
+            </div>
+
             {/* Database + connection */}
             <div className="rounded-lg border p-3">
               <div className="flex items-center gap-2 text-sm font-medium mb-2"><Database className="size-4 text-info" /> Database</div>
